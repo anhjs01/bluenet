@@ -513,9 +513,18 @@ function renderControls(box) {
                 <strong>Comprueba tus parlantes</strong>
                 <p>Reproduce música local y escucha si el sonido sale con claridad.</p>
             </div>
-            <button id="speakerMusicBtn" type="button" class="audio-music-button">
-                <span aria-hidden="true">▶</span> Reproducir música
-            </button>
+            <div class="audio-music-controls">
+                <button id="speakerMusicBtn" type="button" class="audio-music-button">
+                    <span aria-hidden="true">▶</span> Reproducir música
+                </button>
+                <button id="speakerNextBtn" type="button" class="audio-music-next" aria-label="Pasar a la siguiente canción" title="Siguiente canción">
+                    <span aria-hidden="true">⏭</span> Siguiente
+                </button>
+            </div>
+            <div class="audio-volume-control">
+                <label for="speakerMusicVolume"><span aria-hidden="true">🔊</span> Volumen <output id="speakerMusicVolumeValue" for="speakerMusicVolume">70%</output></label>
+                <input id="speakerMusicVolume" type="range" min="0" max="1" step="0.05" value="0.7" aria-label="Volumen de la música">
+            </div>
         </section>
         <audio id="speakerMusicPlayer" preload="none"></audio>
 
@@ -699,7 +708,15 @@ export async function audioTest(
             box.querySelector("#player");
 
         const speakerMusicBtn = box.querySelector("#speakerMusicBtn");
+        const speakerNextBtn = box.querySelector("#speakerNextBtn");
         const speakerMusicPlayer = box.querySelector("#speakerMusicPlayer");
+        const speakerMusicVolume = box.querySelector("#speakerMusicVolume");
+        const speakerMusicVolumeValue = box.querySelector("#speakerMusicVolumeValue");
+        speakerMusicPlayer.volume = Number(speakerMusicVolume.value);
+        speakerMusicVolume.oninput = () => {
+            speakerMusicPlayer.volume = Number(speakerMusicVolume.value);
+            speakerMusicVolumeValue.textContent = Math.round(speakerMusicPlayer.volume * 100) + "%";
+        };
         const speakerTracks = [
             "./audio/Mac%20Miller%20-%20Congratulations%20feat.%20Bilal%20(No%20Intro)%20-%20J.mp3",
             "./audio/Mac%20Miller%20_%20Congratulations%20piano%20cover%20-%20proly_dreamin.mp3"
@@ -741,6 +758,16 @@ export async function audioTest(
                 } catch {
                     setTestStatus(box, "No se pudo reproducir la música. Vuelve a intentarlo.");
                 }
+            }
+        };
+
+        speakerNextBtn.onclick = async () => {
+            const wasPlaying = !speakerMusicPlayer.paused;
+            speakerMusicPlayer.pause();
+            await playRandomSpeakerTrack();
+            if (!wasPlaying && !speakerMusicPlayer.paused) {
+                speakerMusicPlayer.pause();
+                speakerMusicBtn.innerHTML = '<span aria-hidden="true">▶</span> Reproducir música';
             }
         };
 
