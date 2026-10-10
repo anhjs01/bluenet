@@ -1177,3 +1177,96 @@ footer {
         flex: 1 1 100%;
     }
 }
+
+
+/* Controles compactos del reproductor musical */
+.audio-music-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.audio-music-next {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 10px 13px;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    color: #3730a3;
+    background: #fff;
+    font: inherit;
+    font-size: .86rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+.audio-music-next:hover {
+    background: #eef2ff;
+    border-color: #818cf8;
+    transform: translateY(-1px);
+}
+
+.audio-music-next:focus-visible {
+    outline: 3px solid #93c5fd;
+    outline-offset: 3px;
+}
+
+.audio-volume-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 100%;
+    min-width: 0;
+    padding-top: 4px;
+}
+
+.audio-volume-control label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 112px;
+    color: #334155;
+    font-size: .8rem;
+    font-weight: 750;
+}
+
+.audio-volume-control output {
+    min-width: 34px;
+    color: #4338ca;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.audio-volume-control input[type="range"] {
+    width: 100%;
+    min-width: 70px;
+    accent-color: #4f46e5;
+    cursor: pointer;
+}
+
+@media (max-width: 600px) {
+    .audio-music-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, .8fr);
+        width: 100%;
+    }
+
+    .audio-music-controls button {
+        width: 100%;
+        padding-inline: 10px;
+        font-size: .82rem;
+    }
+
+    .audio-volume-control {
+        gap: 8px;
+    }
+
+    .audio-volume-control label {
+        min-width: 96px;
+    }
+}
