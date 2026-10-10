@@ -590,6 +590,12 @@ function renderControls(box) {
 
         </div>
 
+        <div class="audio-main-action">
+            <button id="speakerMusicBtn" type="button" class="secondary">
+                ▶️ Reproducir música para probar parlantes
+            </button>
+        </div>
+        <audio id="speakerMusicPlayer" preload="none"></audio>
 
         <audio
             id="player"
@@ -685,6 +691,56 @@ export async function audioTest(
 
         const player =
             box.querySelector("#player");
+
+        const speakerMusicBtn = box.querySelector("#speakerMusicBtn");
+        const speakerMusicPlayer = box.querySelector("#speakerMusicPlayer");
+        const speakerTracks = [
+            "./audio/Mac%20Miller%20-%20Congratulations%20feat.%20Bilal%20(No%20Intro)%20-%20J.mp3",
+            "./audio/Mac%20Miller%20_%20Congratulations%20piano%20cover%20-%20proly_dreamin.mp3"
+        ];
+        let currentSpeakerTrack = -1;
+
+        const playRandomSpeakerTrack = async () => {
+            if (speakerTracks.length > 1) {
+                let nextTrack = currentSpeakerTrack;
+                while (nextTrack === currentSpeakerTrack) {
+                    nextTrack = Math.floor(Math.random() * speakerTracks.length);
+                }
+                currentSpeakerTrack = nextTrack;
+            } else {
+                currentSpeakerTrack = 0;
+            }
+            speakerMusicPlayer.src = speakerTracks[currentSpeakerTrack];
+            try {
+                await speakerMusicPlayer.play();
+                speakerMusicBtn.textContent = "⏸ Pausar música";
+            } catch {
+                speakerMusicBtn.textContent = "▶️ Reproducir música para probar parlantes";
+                setTestStatus(box, "No se pudo reproducir la música. Vuelve a intentarlo.");
+            }
+        };
+
+        speakerMusicBtn.onclick = async () => {
+            if (!speakerMusicPlayer.paused) {
+                speakerMusicPlayer.pause();
+                speakerMusicBtn.textContent = "▶️ Reproducir música para probar parlantes";
+                return;
+            }
+            if (!speakerMusicPlayer.src) {
+                await playRandomSpeakerTrack();
+            } else {
+                try {
+                    await speakerMusicPlayer.play();
+                    speakerMusicBtn.textContent = "⏸ Pausar música";
+                } catch {
+                    setTestStatus(box, "No se pudo reproducir la música. Vuelve a intentarlo.");
+                }
+            }
+        };
+
+        speakerMusicPlayer.onended = () => {
+            playRandomSpeakerTrack();
+        };
 
         const state =
             box.querySelector(
@@ -965,6 +1021,13 @@ export async function audioTest(
 
 
 export function cleanupAudio() {
+
+    const speakerMusicPlayer = document.querySelector("#speakerMusicPlayer");
+    if (speakerMusicPlayer) {
+        speakerMusicPlayer.pause();
+        speakerMusicPlayer.removeAttribute("src");
+        speakerMusicPlayer.load();
+    }
 
     clearInterval(timer);
 
