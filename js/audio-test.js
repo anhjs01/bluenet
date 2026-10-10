@@ -506,6 +506,19 @@ function renderControls(box) {
 
     box.innerHTML = `
 
+        <section class="audio-music-panel" aria-label="Prueba de parlantes">
+            <div class="audio-music-icon" aria-hidden="true">♫</div>
+            <div class="audio-music-copy">
+                <span class="audio-music-eyebrow">PRUEBA DE SALIDA</span>
+                <strong>Comprueba tus parlantes</strong>
+                <p>Reproduce música local y escucha si el sonido sale con claridad.</p>
+            </div>
+            <button id="speakerMusicBtn" type="button" class="audio-music-button">
+                <span aria-hidden="true">▶</span> Reproducir música
+            </button>
+        </section>
+        <audio id="speakerMusicPlayer" preload="none"></audio>
+
         <div class="audio-device-panel">
 
             <div class="audio-device-field">
@@ -589,13 +602,6 @@ function renderControls(box) {
             </button>
 
         </div>
-
-        <div class="audio-main-action">
-            <button id="speakerMusicBtn" type="button" class="secondary">
-                ▶️ Reproducir música para probar parlantes
-            </button>
-        </div>
-        <audio id="speakerMusicPlayer" preload="none"></audio>
 
         <audio
             id="player"
@@ -713,9 +719,9 @@ export async function audioTest(
             speakerMusicPlayer.src = speakerTracks[currentSpeakerTrack];
             try {
                 await speakerMusicPlayer.play();
-                speakerMusicBtn.textContent = "⏸ Pausar música";
+                speakerMusicBtn.innerHTML = '<span aria-hidden="true">Ⅱ</span> Pausar música';
             } catch {
-                speakerMusicBtn.textContent = "▶️ Reproducir música para probar parlantes";
+                speakerMusicBtn.innerHTML = '<span aria-hidden="true">▶</span> Reproducir música';
                 setTestStatus(box, "No se pudo reproducir la música. Vuelve a intentarlo.");
             }
         };
@@ -723,7 +729,7 @@ export async function audioTest(
         speakerMusicBtn.onclick = async () => {
             if (!speakerMusicPlayer.paused) {
                 speakerMusicPlayer.pause();
-                speakerMusicBtn.textContent = "▶️ Reproducir música para probar parlantes";
+                speakerMusicBtn.innerHTML = '<span aria-hidden="true">▶</span> Reproducir música';
                 return;
             }
             if (!speakerMusicPlayer.src) {
@@ -731,7 +737,7 @@ export async function audioTest(
             } else {
                 try {
                     await speakerMusicPlayer.play();
-                    speakerMusicBtn.textContent = "⏸ Pausar música";
+                    speakerMusicBtn.innerHTML = '<span aria-hidden="true">Ⅱ</span> Pausar música';
                 } catch {
                     setTestStatus(box, "No se pudo reproducir la música. Vuelve a intentarlo.");
                 }
