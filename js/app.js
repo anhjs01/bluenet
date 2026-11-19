@@ -244,7 +244,19 @@ async function requireLot(){
   return false;
 }
 
-function openForm(d={}){
+async function getManufacturers(){
+  const saved=await getByKey(CONFIG.meta,"manufacturers");
+  return Array.isArray(saved?.value)&&saved.value.length?saved.value:CONFIG.manufacturers.slice();
+}
+
+async function saveManufacturers(list){
+  const clean=[...new Map(list.map(x=>[String(x).trim().toLocaleLowerCase(),String(x).trim()])).values()].filter(Boolean);
+  await put(CONFIG.meta,{key:"manufacturers",value:clean});
+  await sync.broadcastSnapshot(await getSnapshot());
+  return clean;
+}
+
+async function openForm(d={}){
   draft={...d};
 
   root.innerHTML=
