@@ -246,7 +246,7 @@ async function requireLot(){
 
 async function getManufacturers(){
   const saved=await getByKey(CONFIG.meta,"manufacturers");
-  return Array.isArray(saved?.value)&&saved.value.length?saved.value:CONFIG.manufacturers.slice();
+  return Array.isArray(saved?.value)?saved.value:CONFIG.manufacturers.slice();
 }
 
 async function saveManufacturers(list){
