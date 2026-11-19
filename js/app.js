@@ -336,11 +336,39 @@ function openForm(d={}){
   $("#id").value=d.unitId||"";
   $("#ticket").value=d.ticket||"";
 
-  $("#man").innerHTML=CONFIG.manufacturers
-    .map(x=>"<option>"+esc(x)+"</option>")
-    .join("");
-
-  $("#man").value=d.manufacturer||"Pendiente";
+  let manufacturerOptions=await getManufacturers();
+  const currentManufacturer=String(d.manufacturer||"Pendiente").trim();
+  if(currentManufacturer&&!manufacturerOptions.some(x=>x.toLocaleLowerCase()===currentManufacturer.toLocaleLowerCase()))manufacturerOptions=[...manufacturerOptions,currentManufacturer];
+  const renderManufacturers=selected=>{
+    $("#man").innerHTML=manufacturerOptions.map(x=>'<option value="'+esc(x)+'">'+esc(x)+"</option>").join("");
+    $("#man").value=manufacturerOptions.includes(selected)?selected:(manufacturerOptions[0]||"Pendiente");
+  };
+  renderManufacturers(currentManufacturer);
+  $("#manageManufacturers").onclick=()=>{
+    const panel=$("#manufacturerManager");
+    panel.classList.toggle("hidden");
+    if(panel.classList.contains("hidden"))return;
+    const draw=()=>{
+      panel.innerHTML='<div class="manufacturer-manager"><b>Marcas disponibles</b><div class="manufacturer-list">'+manufacturerOptions.map((name,i)=>'<div class="manufacturer-item"><span>'+esc(name)+'</span><button type="button" class="danger" data-remove-manufacturer="'+i+'">Quitar</button></div>').join("")+'</div><button type="button" id="addManufacturer" class="primary">＋ Añadir fabricante</button><small>Las marcas retiradas no aparecerán en nuevos registros. Los registros existentes se conservan.</small></div>';
+      panel.querySelector("#addManufacturer").onclick=async()=>{
+        const value=prompt("Nombre del nuevo fabricante:");
+        const name=String(value||"").trim();
+        if(!name)return;
+        if(manufacturerOptions.some(x=>x.toLocaleLowerCase()===name.toLocaleLowerCase()))return alert("Ese fabricante ya existe.");
+        manufacturerOptions=await saveManufacturers([...manufacturerOptions,name]);
+        renderManufacturers(name);
+        draw();
+      };
+      panel.querySelectorAll("[data-remove-manufacturer]").forEach(button=>button.onclick=async()=>{
+        const index=Number(button.dataset.removeManufacturer),name=manufacturerOptions[index];
+        if(!name||!confirm('¿Quitar "'+name+'" de las opciones? Los registros existentes no se modificarán.'))return;
+        manufacturerOptions=await saveManufacturers(manufacturerOptions.filter((_,i)=>i!==index));
+        if($("#man").value===name)renderManufacturers(manufacturerOptions.includes("Pendiente")?"Pendiente":manufacturerOptions[0]);
+        draw();
+      });
+    };
+    draw();
+  };
 
   $("#diag").value=
     d.diagnosis==="No reparable"
