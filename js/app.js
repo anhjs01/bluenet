@@ -283,6 +283,8 @@ async function openForm(d={}){
           '<div class="field">'+
             "<label>Fabricante</label>"+
             '<select id="man"></select>'+
+            '<button type="button" id="manageManufacturers" class="secondary">⚙ Administrar fabricantes</button>'+
+            '<div id="manufacturerManager" class="hidden"></div>'+
           "</div>"+
           '<div class="field">'+
             "<label>Diagnóstico</label>"+
