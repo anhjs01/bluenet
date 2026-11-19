@@ -352,10 +352,11 @@ async function openForm(d={}){
 
   let manufacturerOptions=await getManufacturers();
   const currentManufacturer=String(d.manufacturer||"Pendiente").trim();
-  if(currentManufacturer&&!manufacturerOptions.some(x=>x.toLocaleLowerCase()===currentManufacturer.toLocaleLowerCase()))manufacturerOptions=[...manufacturerOptions,currentManufacturer];
   const renderManufacturers=selected=>{
-    $("#man").innerHTML=manufacturerOptions.map(x=>'<option value="'+esc(x)+'">'+esc(x)+"</option>").join("");
-    $("#man").value=manufacturerOptions.includes(selected)?selected:(manufacturerOptions[0]||"Pendiente");
+    const options=manufacturerOptions.slice();
+    if(selected&&!options.some(x=>x.toLocaleLowerCase()===selected.toLocaleLowerCase()))options.push(selected);
+    $("#man").innerHTML=options.map(x=>'<option value="'+esc(x)+'">'+esc(x)+"</option>").join("");
+    $("#man").value=options.includes(selected)?selected:(options[0]||"Pendiente");
   };
   renderManufacturers(currentManufacturer);
   $("#manageManufacturers").onclick=()=>{
