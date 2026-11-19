@@ -353,7 +353,8 @@ async function openForm(d={}){
   let manufacturerOptions=await getManufacturers();
   const currentManufacturer=String(d.manufacturer||"Pendiente").trim();
   const renderManufacturers=selected=>{
-    const options=manufacturerOptions.slice();\n    if(!options.length)options.push("Pendiente");
+    const options=manufacturerOptions.slice();
+    if(!options.length)options.push("Pendiente");
     if(selected&&!options.some(x=>x.toLocaleLowerCase()===selected.toLocaleLowerCase()))options.push(selected);
     $("#man").innerHTML=options.map(x=>'<option value="'+esc(x)+'">'+esc(x)+"</option>").join("");
     $("#man").value=options.includes(selected)?selected:(options[0]||"Pendiente");
