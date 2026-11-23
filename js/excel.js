@@ -268,12 +268,9 @@ export async function exportExcel(u, lotName = "") {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
       const existing = sheet[address] || {};
       const baseStyle = rowStyles[columnIndex] || {};
-      const style = clone(baseStyle) || {};
-      const baseFont = baseStyle.font || {};
-      const baseAlignment = baseStyle.alignment || {};
-      style.font = { ...baseFont, name: "Tahoma", sz: 5 };
-      style.alignment = { ...baseAlignment, horizontal: "center", vertical: "center" };
-      existing.s = style;
+      // Mantener intacto el estilo de la plantilla: fuente, tamaño, negrita,
+      // color, relleno, bordes y alineación originales de cada columna.
+      if (baseStyle && Object.keys(baseStyle).length) existing.s = clone(baseStyle);
       if (value === null || value === undefined || value === "") {
         existing.t = "s";
         existing.v = "";
@@ -340,20 +337,33 @@ export async function exportExcel(u, lotName = "") {
     if (originalDoc.querySelector("parsererror") || generatedDoc.querySelector("parsererror")) {
       throw new Error("La plantilla o la hoja generada contiene XML no válido.");
     }
+
+    // La plantilla original es la autoridad visual. Solo sustituimos sheetData
+    // (las filas/celdas con los datos) y actualizamos su dimensión. Así se
+    // mantienen literalmente sus dibujos, logo, configuración de impresión,
+    // filas/columnas, combinaciones, filtros, vistas y demás propiedades.
+    const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
     const originalRoot = originalDoc.documentElement;
     const generatedRoot = generatedDoc.documentElement;
-    const graphicElements = new Set(["drawing", "legacyDrawing", "legacyDrawingHF", "picture", "oleObjects", "controls", "webPublishItems"]);
-    for (const node of Array.from(originalRoot.children)) {
-      if (graphicElements.has(node.localName) && !Array.from(generatedRoot.children).some(item => item.localName === node.localName)) {
-        const copy = generatedDoc.importNode(node, true);
-        const ext = Array.from(generatedRoot.children).find(item => item.localName === "extLst");
-        generatedRoot.insertBefore(copy, ext || null);
-      }
+    const originalData = originalRoot.getElementsByTagNameNS(ns, "sheetData")[0];
+    const generatedData = generatedRoot.getElementsByTagNameNS(ns, "sheetData")[0];
+    if (!originalData || !generatedData) {
+      throw new Error("No se encontró el bloque de datos de la plantilla o de la hoja generada.");
     }
+    const importedData = originalDoc.importNode(generatedData, true);
+    originalData.parentNode.replaceChild(importedData, originalData);
+
+    const originalDimension = originalRoot.getElementsByTagNameNS(ns, "dimension")[0];
+    const generatedDimension = generatedRoot.getElementsByTagNameNS(ns, "dimension")[0];
+    if (originalDimension && generatedDimension) {
+      originalDimension.setAttribute("ref", generatedDimension.getAttribute("ref"));
+    }
+
     const serializer = new XMLSerializer();
-    const mergedSheetXml = serializer.serializeToString(generatedDoc);
+    const mergedSheetXml = serializer.serializeToString(originalDoc);
     originalZip.file(sheetPath, mergedSheetXml);
-    originalZip.file("xl/styles.xml", generatedStylesFile);
+    // No sustituir styles.xml: conserva todos los estilos corporativos originales.
+
     const finalBlob = await originalZip.generateAsync({ type: "blob", compression: "DEFLATE" });
     const blob = finalBlob;
     const url = URL.createObjectURL(blob);
