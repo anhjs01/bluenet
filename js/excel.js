@@ -296,8 +296,8 @@ export async function exportExcel(u, lotName = "") {
     const unusedRowsCount = Math.max(0, baseCapacity - u.length);
     if (unusedRowsCount) {
       const firstUnusedRow = firstDataRow + u.length;
-      sheetXml = sheetXml.replace(/<row\\b[^>]*>[\\s\\S]*?<\\/row>/g, rowXml => {
-        const rowId = Number((rowXml.match(/^<row\\b[^>]*\\br="(\\d+)"/) || [null, "0"])[1]);
+      sheetXml = sheetXml.replace(/<row\b[^>]*>[\s\S]*?<\/row>/g, rowXml => {
+        const rowId = Number((rowXml.match(/^<row\b[^>]*\br="(\d+)"/) || [null, "0"])[1]);
         return rowId >= firstUnusedRow && rowId <= lastExistingRow ? "" : rowXml;
       });
       sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, -unusedRowsCount);
