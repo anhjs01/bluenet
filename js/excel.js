@@ -201,148 +201,122 @@ function shiftWorksheetRows(xml, startRow, offset) {
 }
 
 export async function exportExcel(u, lotName = "") {
-  if (!window.JSZip || !window.XLSX) return alert("No están disponibles los módulos necesarios para conservar la plantilla Excel original.");
+  if (!window.XLSX) return alert("No está disponible el módulo necesario para generar el Excel.");
 
-  let sourceZip;
-  let headerColumns;
   try {
     const response = await fetch("./guias/prueba01.xlsx", { cache: "no-store" });
-    if (!response.ok) throw new Error("No se pudo cargar la nueva plantilla Prueba 01.");
+    if (!response.ok) throw new Error("No se pudo cargar la plantilla Prueba 01.");
     const sourceBuffer = await response.arrayBuffer();
-    const workbook = XLSX.read(sourceBuffer, { type: "array" });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", blankrows: true });
-    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const required = ["article", "serial", "brand", "request", "delivery"];
-    const identifyHeaders = row => {
-      const found = {};
-      (row || []).slice(0, 8).forEach((value, index) => {
-        const h = normalize(value);
-        if (/articulo|article|artic|^n ?(?:ro|umero)?$/.test(h)) found.article = index;
-        else if (/serie|serial|n s|ns|numero.*serie/.test(h)) found.serial = index;
-        else if (/marca|fabricante|brand/.test(h)) found.brand = index;
-        else if (/sin|ticket|solicitud|request/.test(h)) found.request = index;
-        else if (/tipo.*mantenimiento|mantenimiento|maintenance/.test(h)) found.maintenance = index;
-        else if (/fecha.*entrega|fecha entrega|delivery date|delivery/.test(h)) found.delivery = index;
+    const workbook = XLSX.read(sourceBuffer, { type: "array", cellStyles: true });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) throw new Error("La plantilla no contiene una hoja válida.");
+
+    // Columnas confirmadas de Prueba 01: A artículo, B SIN/ticket,
+    // C fabricante, D N-S/serial, F lectura, G reparación, H entrega.
+    const columns = { article: 0, request: 1, brand: 2, serial: 3, readType: 5, maintenance: 6, delivery: 7 };
+    const firstDataIndex = 5; // Fila 6 en Excel.
+    const originalLastDataIndex = 64; // Fila 65 en Excel.
+    const footerStartIndex = 65; // Fila 66 en Excel.
+    const units = Array.isArray(u) ? u : [];
+    const rowDelta = units.length - 60;
+
+    const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
+    const originalRows = sheet["!rows"] ? sheet["!rows"].slice() : [];
+    const templateRowMeta = clone(originalRows[firstDataIndex]);
+    const rowStyles = {};
+    for (let col = 0; col < 8; col++) {
+      const address = XLSX.utils.encode_cell({ r: firstDataIndex, c: col });
+      rowStyles[col] = clone(sheet[address]?.s) || {};
+    }
+
+    // Eliminar únicamente el bloque de captura anterior y desplazar el pie
+    // de plantilla para que quede inmediatamente después del número real de unidades.
+    const cellKeys = Object.keys(sheet).filter(key => !key.startsWith("!"));
+    for (const key of cellKeys) {
+      const point = XLSX.utils.decode_cell(key);
+      if (point.r >= firstDataIndex && point.r <= originalLastDataIndex) delete sheet[key];
+      else if (point.r >= footerStartIndex && rowDelta !== 0) {
+        const destination = { r: point.r + rowDelta, c: point.c };
+        const newAddress = XLSX.utils.encode_cell(destination);
+        sheet[newAddress] = sheet[key];
+        delete sheet[key];
+      }
+    }
+
+    if (Array.isArray(sheet["!merges"]) && rowDelta !== 0) {
+      sheet["!merges"] = sheet["!merges"].map(range => {
+        const moved = clone(range);
+        if (moved.s.r >= footerStartIndex) moved.s.r += rowDelta;
+        if (moved.e.r >= footerStartIndex) moved.e.r += rowDelta;
+        return moved;
       });
-      return found;
-    };
-    // Priorizar la fila 5 y aceptar encabezados abreviados como "Artículo" y "Serial".
-    headerColumns = identifyHeaders(matrix[4]);
-    const countHeaders = found => required.filter(key => found[key] !== undefined).length;
-    // Algunas copias de la plantilla desplazan los títulos por celdas combinadas.
-    if (countHeaders(headerColumns) < required.length) {
-      const alternatives = matrix.slice(0, 8).map((row, index) => ({ row: index + 1, found: identifyHeaders(row) }));
-      alternatives.sort((a, b) => countHeaders(b.found) - countHeaders(a.found));
-      if (countHeaders(alternatives[0]?.found || {}) > countHeaders(headerColumns)) headerColumns = alternatives[0].found;
     }
-    // En Prueba 01, la columna F identifica el método de lectura y G la reparación.
-    headerColumns.readType = 5;
-    headerColumns.maintenance = 6;
-    // Si la plantilla usa un título no estándar para el número de serie,
-    // inferir la columna inmediatamente posterior a "Artículo" solo si está libre.
-    if (headerColumns.serial === undefined && headerColumns.article !== undefined) {
-      const inferredSerialColumn = headerColumns.article + 1;
-      const occupied = Object.entries(headerColumns).some(([key, value]) => key !== "serial" && value === inferredSerialColumn);
-      if (inferredSerialColumn < 8 && !occupied) headerColumns.serial = inferredSerialColumn;
-    }
-    const missing = required.filter(key => headerColumns[key] === undefined || headerColumns[key] > 7);
-    if (missing.length) {
-      const labels = { article: "Artículo sin etiqueta", serial: "Número de serie", brand: "Marca", request: "Solicitud de reparación", maintenance: "Tipo de mantenimiento", delivery: "Fecha de entrega" };
-      throw new Error("No se encontraron en A:H los encabezados: " + missing.map(key => labels[key]).join(", ") + ". Se revisó la fila 5 y las filas cercanas. No se descargó un Excel incompleto.");
-    }
-    sourceZip = await JSZip.loadAsync(sourceBuffer);
-  } catch (error) {
-    alert("No se pudo preparar la nueva plantilla Prueba 01.\n" + (error.message || ""));
-    return;
-  }
 
-  try {
-    const sheetPath = "xl/worksheets/sheet1.xml";
-    const sheetFile = sourceZip.file(sheetPath);
-    if (!sheetFile) throw new Error("La plantilla no contiene la primera hoja Excel esperada.");
-    let sheetXml = await sheetFile.async("string");
+    if (originalRows.length) {
+      const footerRows = originalRows.slice(footerStartIndex);
+      const dataRows = Array.from({ length: units.length }, () => clone(templateRowMeta));
+      sheet["!rows"] = originalRows.slice(0, firstDataIndex).concat(dataRows, footerRows);
+    }
 
-    // Prueba 01: filas 1–5 y 66–68 quedan reservadas; los registros empiezan en la fila 6.
-    const firstDataRow = 6;
-    const lastExistingRow = 65;
-    const firstInsertRow = 66;
-    const lastDataCol = 8;
-    const colName = number => {
-      let n = number, name = "";
-      while (n > 0) {
-        const rem = (n - 1) % 26;
-        name = String.fromCharCode(65 + rem) + name;
-        n = Math.floor((n - 1) / 26);
+    const setCell = (rowIndex, columnIndex, value) => {
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+      const existing = sheet[address] || {};
+      const style = clone(existing.s) || {};
+      const baseStyle = rowStyles[columnIndex] || {};
+      const baseFont = baseStyle.font || {};
+      const baseAlignment = baseStyle.alignment || {};
+      style.font = { ...baseFont, name: "Tahoma", sz: 5 };
+      style.alignment = { ...baseAlignment, horizontal: "center", vertical: "center" };
+      existing.s = style;
+      if (value === null || value === undefined || value === "") {
+        existing.t = "s";
+        existing.v = "";
+      } else if (typeof value === "number" && Number.isFinite(value)) {
+        existing.t = "n";
+        existing.v = value;
+      } else {
+        existing.t = "s";
+        existing.v = String(value);
       }
-      return name;
+      delete existing.w;
+      delete existing.f;
+      sheet[address] = existing;
     };
 
-    const uniformStyle = await createTahomaCenteredStyle(sourceZip);
-    const fallbackStyles = {};
-    for (let c = 1; c <= lastDataCol; c++) {
-      const col = colName(c);
-      fallbackStyles[col] = uniformStyle || excelCellStyle(sheetXml, col + firstDataRow);
-    }
-
-    const templateRowMatch = sheetXml.match(new RegExp('<row\\b(?=[^>]*\\br="' + firstDataRow + '")[^>]*>[\\s\\S]*?<\\/row>'));
-    const templateRowXml = templateRowMatch?.[0] || "";
-    if (!templateRowXml) throw new Error("No se encontró la fila 6 para extender el formato de la plantilla.");
-
-    // Mantener temporalmente el bloque inferior en su posición original.
-    // La compactación se reintroducirá después de validar el XML generado.
-    const extraRowsCount = Math.max(0, u.length - (lastExistingRow - firstDataRow + 1));
-    if (extraRowsCount) {
-      sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, extraRowsCount);
-      const extraRows = [];
-      for (let row = firstInsertRow; row < firstInsertRow + extraRowsCount; row++) {
-        let clone = templateRowXml.replace(/\br="6"/g, 'r="' + row + '"').replace(/\br="([A-Z]+)6"/g, 'r="$1' + row + '"');
-        for (let c = 1; c <= lastDataCol; c++) {
-          const col = colName(c);
-          clone = setExcelCell(clone, col + row, null, fallbackStyles[col]);
-        }
-        extraRows.push(clone);
-      }
-      const shiftedFooterRow = firstInsertRow + extraRowsCount;
-      const footerMatch = new RegExp('<row\\b(?=[^>]*\\br="' + shiftedFooterRow + '")[^>]*>');
-      const footerIndex = sheetXml.search(footerMatch);
-      const insertAt = footerIndex >= 0 ? footerIndex : sheetXml.indexOf("</sheetData>");
-      if (insertAt < 0) throw new Error("No se encontró el área de filas de la hoja Excel.");
-      sheetXml = sheetXml.slice(0, insertAt) + extraRows.join("") + sheetXml.slice(insertAt);
-    }
-
-    // Limpiar únicamente A6:H65. El resto del libro conserva sus valores y formato.
-    for (let row = firstDataRow; row <= lastExistingRow; row++) {
-      for (let c = 1; c <= lastDataCol; c++) {
-        const col = colName(c);
-        sheetXml = setExcelCell(sheetXml, col + row, null, fallbackStyles[col]);
-      }
-    }
-
-    const deliveryDate = unit => excelSerialDate(unit.deliveryDate || unit.deliveredAt || "");
-    const valuesForUnit = (unit, index) => ({
-      article: unit.sequence ?? index + 1,
-      serial: String(unit.unitId || ""),
-      brand: unit.manufacturer || "",
-      request: unit.ticket || "",
-      readType: /manual/i.test(String(unit.readType || "")) ? "Manual" : "Barcode",
-      maintenance: (unit.repairs || []).join(" + "),
-      delivery: deliveryDate(unit)
+    const toDateSerial = unit => excelSerialDate(unit.deliveryDate || unit.deliveredAt || "");
+    units.forEach((unit, index) => {
+      const row = firstDataIndex + index;
+      setCell(row, columns.article, unit.sequence ?? index + 1);
+      setCell(row, columns.request, unit.ticket || "");
+      setCell(row, columns.brand, unit.manufacturer || "");
+      setCell(row, columns.serial, String(unit.unitId || ""));
+      setCell(row, columns.readType, /manual/i.test(String(unit.readType || "")) ? "Manual" : "Barcode");
+      setCell(row, columns.maintenance, (unit.repairs || []).join(" + "));
+      setCell(row, columns.delivery, toDateSerial(unit));
     });
-    const keyToValue = { article: "article", serial: "serial", brand: "brand", request: "request", readType: "readType", maintenance: "maintenance", delivery: "delivery" };
 
-    for (let i = 0; i < u.length; i++) {
-      const row = firstDataRow + i;
-      const data = valuesForUnit(u[i], i);
-      for (const key of Object.keys(keyToValue)) {
-        const col = colName(headerColumns[key] + 1);
-        sheetXml = setExcelCell(sheetXml, col + row, data[keyToValue[key]], fallbackStyles[col]);
-      }
+    const used = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 67, c: 7 } };
+    used.e.r = Math.max(used.e.r + rowDelta, firstDataIndex + Math.max(0, units.length - 1), 67 + rowDelta);
+    used.e.c = Math.max(used.e.c, 7);
+    sheet["!ref"] = XLSX.utils.encode_range(used);
+
+    // Mantener el área de impresión y autofiltro alineados si existen.
+    if (sheet["!autofilter"]?.ref && rowDelta !== 0) {
+      const range = XLSX.utils.decode_range(sheet["!autofilter"].ref);
+      if (range.s.r >= footerStartIndex) range.s.r += rowDelta;
+      if (range.e.r >= footerStartIndex) range.e.r += rowDelta;
+      sheet["!autofilter"].ref = XLSX.utils.encode_range(range);
     }
 
-    sourceZip.file(sheetPath, sheetXml);
-    const finalBlob = await sourceZip.generateAsync({ type: "blob", compression: "DEFLATE" });
-    const url = URL.createObjectURL(finalBlob);
+    const output = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+      cellStyles: true,
+      compression: true
+    });
+    const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = safeExcelFileName(lotName);
@@ -352,7 +326,7 @@ export async function exportExcel(u, lotName = "") {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
     console.error("Error al generar el Excel con Prueba 01:", error);
-    alert("No se pudo generar el Excel conservando intacto el diseño de Prueba 01. No se descargó un archivo incompleto.\n" + (error.message || ""));
+    alert("No se pudo generar el Excel. No se descargó un archivo incompleto.\n" + (error.message || ""));
   }
 }
 
