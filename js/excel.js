@@ -164,65 +164,13 @@ function safeExcelFileName(value) {
   return (cleaned || "conteo-rapido-remision") + ".xlsx";
 }
 
-function shiftExcelRowsDown(sheetXml, startRow, amount) {
-  if (amount <= 0) return sheetXml;
-
-  sheetXml = sheetXml.replace(/<row\b[^>]*\br="(\d+)"[^>]*>[\s\S]*?<\/row>/g, (rowXml, rowText) => {
-    const rowNumber = Number(rowText);
-    if (rowNumber < startRow) return rowXml;
-    const nextRow = rowNumber + amount;
-    let updated = rowXml.replace(/(<row\b[^>]*\br=")\d+(")/, "$1" + nextRow + "$2");
-    const cellRefPattern = new RegExp('(\\br="[A-Z]+)' + rowNumber + '(")', "g");
-    updated = updated.replace(cellRefPattern, "$1" + nextRow + "$2");
-    return updated;
-  });
-
-  sheetXml = sheetXml.replace(/(<mergeCell\b[^>]*\bref=")([^"]+)(")/g, (_match, before, reference, after) => {
-    const shifted = reference.replace(/([A-Z]+)(\d+)/g, (_part, column, rowText) => {
-      const row = Number(rowText);
-      return column + (row >= startRow ? row + amount : row);
-    });
-    return before + shifted + after;
-  });
-
-  sheetXml = sheetXml.replace(/(<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)(\d+)(")/, (_match, before, lastRow, after) => {
-    const row = Number(lastRow);
-    return before + (row >= startRow ? row + amount : row) + after;
-  });
-
-  return sheetXml;
-}
-
-function cloneExcelRow(rowXml, fromRow, toRow) {
-  let clone = rowXml.replace(/(<row\b[^>]*\br=")\d+(")/, "$1" + toRow + "$2");
-  const cellRefPattern = new RegExp('(\\br="[A-Z]+)' + fromRow + '(")', "g");
-  return clone.replace(cellRefPattern, "$1" + toRow + "$2");
-}
-
-function insertExcelRowsBefore(sheetXml, rowXml, beforeRow, count, templateRowNumber) {
-  if (count <= 0) return sheetXml;
-  const rows = [];
-  for (let offset = 0; offset < count; offset++) {
-    rows.push(cloneExcelRow(rowXml, templateRowNumber, beforeRow + offset));
-  }
-
-  const nextRow = beforeRow + count;
-  const marker = new RegExp('<row\\b(?=[^>]*\\br="' + nextRow + '")[^>]*>[\\s\\S]*?<\\/row>');
-  const match = sheetXml.match(marker);
-  if (match && match.index !== undefined) {
-    return sheetXml.slice(0, match.index) + rows.join("") + sheetXml.slice(match.index);
-  }
-
-  return sheetXml.replace("</sheetData>", rows.join("") + "</sheetData>");
-}
-
-export async function exportExcel(u, lotName = "", lotDate = "") {
+export async function exportExcel(u, lotName = "") {
   if (!window.JSZip) return alert("No está disponible el módulo necesario para conservar la plantilla Excel original.");
 
   let sourceZip;
   try {
     const response = await fetch("./guias/plantilla-remision-tabla.xlsx", { cache: "no-store" });
-    if (!response.ok) throw new Error("No se pudo cargar la plantilla REM-04067-NEXA.");
+    if (!response.ok) throw new Error("No se pudo cargar la plantilla final de remisión.");
     sourceZip = await JSZip.loadAsync(await response.arrayBuffer());
   } catch (error) {
     alert("No se pudo preparar el Excel institucional. Comprueba que la carpeta guias esté junto a la aplicación y vuelve a intentarlo.\n" + (error.message || ""));
@@ -230,58 +178,80 @@ export async function exportExcel(u, lotName = "", lotDate = "") {
   }
 
   try {
-    // La plantilla es fija: solo se reemplazan los valores de A6:H65.
-    // No se insertan filas, no se desplaza el footer y no se modifican
-    // encabezado, logo, combinaciones, dimensiones ni firmas.
-    const firstDataRow = 6;
-    const lastDataRow = 65;
-    const capacity = lastDataRow - firstDataRow + 1;
-
-    if (u.length > capacity) {
-      alert("La plantilla REM-04067-NEXA admite máximo 60 equipos por archivo. No se modificó ni se descargó el Excel.");
-      return;
-    }
-
     const sheetPath = "xl/worksheets/sheet1.xml";
     const sheetFile = sourceZip.file(sheetPath);
     if (!sheetFile) throw new Error("La plantilla no contiene la hoja Excel esperada.");
     let sheetXml = await sheetFile.async("string");
 
-    const templateRowMatch = sheetXml.match(/<row\b(?=[^>]*\br="6")[^>]*>[\s\S]*?<\/row>/);
-    const templateRowXml = templateRowMatch?.[0] || "";
-    if (!templateRowXml) throw new Error("No se encontró la fila 6 de la plantilla.");
+    // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
+    // Así se conservan sin reconstruir el libro: logo, imágenes, colores, combinaciones,
+    // bordes, dimensiones, impresión, estilos y todo el encabezado institucional.
+    const firstDataRow = 24;
+    const lastExistingRow = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
+    const lastDataCol = 12; // L
+    const colName = number => {
+      let n = number;
+      let name = "";
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        name = String.fromCharCode(65 + rem) + name;
+        n = Math.floor((n - 1) / 26);
+      }
+      return name;
+    };
 
-    const columns = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    // Capturar los estilos de la primera fila de datos para poder extender la tabla si hace falta.
     const fallbackStyles = {};
-    for (const column of columns) {
-      fallbackStyles[column] = excelCellStyle(templateRowXml, column + firstDataRow);
-    }
+    for (let c = 2; c <= lastDataCol; c++) fallbackStyles[colName(c)] = excelCellStyle(sheetXml, `${colName(c)}${firstDataRow}`);
 
-    // Limpiar exclusivamente las celdas A:H de las filas 6 a 65.
-    for (let row = firstDataRow; row <= lastDataRow; row++) {
-      for (const column of columns) {
-        sheetXml = setExcelCell(sheetXml, column + row, null, fallbackStyles[column]);
+    // Vaciar solo los valores de muestra de la tabla; no se toca ninguna celda de la remisión (filas 1-21)
+    // ni los encabezados de la tabla (fila 23). Los estilos originales de las celdas se mantienen.
+    for (let r = firstDataRow; r <= lastExistingRow; r++) {
+      for (let c = 2; c <= lastDataCol; c++) {
+        sheetXml = setExcelCell(sheetXml, `${colName(c)}${r}`, null, fallbackStyles[colName(c)]);
       }
     }
 
-    // Escribir los datos respetando las ocho columnas y el estilo ya existente.
-    for (let index = 0; index < u.length; index++) {
-      const unit = u[index];
-      const row = firstDataRow + index;
-      const values = [
-        unit.sequence ?? index + 1,
-        unit.ticket || "",
-        String(unit.unitId || ""),
-        unit.manufacturer || "",
-        excelSerialDate(lotDate || unit.lotDate),
-        unit.readType || "",
-        Array.isArray(unit.repairs) ? unit.repairs.join(" + ") : (unit.repairs || ""),
-        null
-      ];
+    const rowXmlMatch = sheetXml.match(new RegExp(`<row\\b(?=[^>]*\\br="${firstDataRow}")[^>]*>[\\s\\S]*?<\\/row>`));
+    const templateRowXml = rowXmlMatch?.[0] || "";
+    const neededLastRow = firstDataRow + Math.max(0, u.length - 1);
+    if (neededLastRow > lastExistingRow && templateRowXml) {
+      const sheetDataEnd = sheetXml.indexOf("</sheetData>");
+      const extraRows = [];
+      for (let r = lastExistingRow + 1; r <= neededLastRow; r++) {
+        let clone = templateRowXml.replace(/\br="24"/g, `r="${r}"`);
+        for (let c = 2; c <= lastDataCol; c++) clone = setExcelCell(clone, `${colName(c)}${r}`, null, fallbackStyles[colName(c)]);
+        extraRows.push(clone);
+      }
+      sheetXml = sheetXml.slice(0, sheetDataEnd) + extraRows.join("") + sheetXml.slice(sheetDataEnd);
+      sheetXml = sheetXml.replace(/(<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, (_match, prefix, suffix) => `${prefix}${neededLastRow}${suffix}`);
+    }
 
-      for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
-        const column = columns[columnIndex];
-        sheetXml = setExcelCell(sheetXml, column + row, values[columnIndex], fallbackStyles[column]);
+    for (let i = 0; i < u.length; i++) {
+      const r = firstDataRow + i;
+      const x = u[i];
+      const isDelivered = delivered(x);
+      const originalObs = String(x.observations || "").trim();
+      const obs = isDelivered
+        ? (/^ENTREGADO(?:\s|·|$)/i.test(originalObs) ? originalObs : ["ENTREGADO", originalObs].filter(Boolean).join(" · "))
+        : originalObs.replace(/^ENTREGADO(?:\s*·\s*|\s+)?/i, "").trim();
+
+      const values = [
+        x.sequence ?? i + 1,
+        x.ticket || "",
+        String(x.unitId || ""),
+        x.manufacturer || "",
+        excelSerialDate(x.lotDate),
+        isDelivered ? excelSerialDate(x.deliveryDate || x.deliveredAt || "") : null,
+        warrantyExpiration(x, isDelivered),
+        x.diagnosis || "",
+        x.repairable === true ? "Sí" : x.repairable === false ? "No" : "",
+        (x.repairs || []).join(" + "),
+        obs
+      ];
+      for (let j = 0; j < values.length; j++) {
+        const col = colName(j + 2);
+        sheetXml = setExcelCell(sheetXml, `${col}${r}`, values[j], fallbackStyles[col]);
       }
     }
 
@@ -296,8 +266,8 @@ export async function exportExcel(u, lotName = "", lotDate = "") {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
-    console.error("Error al generar el Excel con la plantilla REM-04067-NEXA:", error);
-    alert("No se pudo generar el Excel conservando el diseño original. No se descargó un archivo incompleto.\n" + (error.message || ""));
+    console.error("Error al generar el Excel conservando la plantilla original:", error);
+    alert("No se pudo generar el Excel conservando intacto el diseño de la remisión. No se descargó un archivo incompleto.\n" + (error.message || ""));
   }
 }
 
