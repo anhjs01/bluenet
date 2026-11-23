@@ -191,21 +191,35 @@ export async function exportExcel(u, lotName = "") {
     const workbook = XLSX.read(sourceBuffer, { type: "array" });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", blankrows: true });
-    const headerRow = matrix[4] || [];
-    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    headerColumns = {};
-    headerRow.forEach((value, index) => {
-      const h = normalize(value);
-      if (/articulo.*sin.*etiqueta/.test(h)) headerColumns.article = index;
-      else if (/numero.*serie|n.*serie|serie/.test(h)) headerColumns.serial = index;
-      else if (/marca|fabricante/.test(h)) headerColumns.brand = index;
-      else if (/solicitud.*reparacion|ticket/.test(h)) headerColumns.request = index;
-      else if (/tipo.*mantenimiento|mantenimiento/.test(h)) headerColumns.maintenance = index;
-      else if (/fecha.*entrega/.test(h)) headerColumns.delivery = index;
-    });
+    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const required = ["article", "serial", "brand", "request", "maintenance", "delivery"];
+    const identifyHeaders = row => {
+      const found = {};
+      (row || []).slice(0, 8).forEach((value, index) => {
+        const h = normalize(value);
+        if (/articulo|article|artic/.test(h)) found.article = index;
+        else if (/numero.*serie|n.*serie|serial|serie/.test(h)) found.serial = index;
+        else if (/marca|fabricante|brand/.test(h)) found.brand = index;
+        else if (/solicitud.*reparacion|solicitud|ticket|request/.test(h)) found.request = index;
+        else if (/tipo.*mantenimiento|mantenimiento|maintenance/.test(h)) found.maintenance = index;
+        else if (/fecha.*entrega|fecha entrega|delivery date|delivery/.test(h)) found.delivery = index;
+      });
+      return found;
+    };
+    // Priorizar la fila 5 y aceptar encabezados abreviados como "Artículo" y "Serial".
+    headerColumns = identifyHeaders(matrix[4]);
+    const countHeaders = found => required.filter(key => found[key] !== undefined).length;
+    // Algunas copias de la plantilla desplazan los títulos por celdas combinadas.
+    if (countHeaders(headerColumns) < required.length) {
+      const alternatives = matrix.slice(0, 8).map((row, index) => ({ row: index + 1, found: identifyHeaders(row) }));
+      alternatives.sort((a, b) => countHeaders(b.found) - countHeaders(a.found));
+      if (countHeaders(alternatives[0]?.found || {}) > countHeaders(headerColumns)) headerColumns = alternatives[0].found;
+    }
     const missing = required.filter(key => headerColumns[key] === undefined || headerColumns[key] > 7);
-    if (missing.length) throw new Error("No se identificaron todos los encabezados de Prueba 01 en la fila 5 (A:H): " + missing.join(", ") + ". No se descargó un Excel incompleto.");
+    if (missing.length) {
+      const labels = { article: "Artículo sin etiqueta", serial: "Número de serie", brand: "Marca", request: "Solicitud de reparación", maintenance: "Tipo de mantenimiento", delivery: "Fecha de entrega" };
+      throw new Error("No se encontraron en A:H los encabezados: " + missing.map(key => labels[key]).join(", ") + ". Se revisó la fila 5 y las filas cercanas. No se descargó un Excel incompleto.");
+    }
     sourceZip = await JSZip.loadAsync(sourceBuffer);
   } catch (error) {
     alert("No se pudo preparar la nueva plantilla Prueba 01.\n" + (error.message || ""));
