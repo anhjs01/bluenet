@@ -201,12 +201,13 @@ function shiftWorksheetRows(xml, startRow, offset) {
 }
 
 export async function exportExcel(u, lotName = "") {
-  if (!window.XLSX) return alert("No está disponible el módulo necesario para generar el Excel.");
+  if (!window.XLSX || !window.JSZip) return alert("No están disponibles los módulos necesarios para conservar la plantilla Excel original.");
 
   try {
     const response = await fetch("./guias/prueba01.xlsx", { cache: "no-store" });
     if (!response.ok) throw new Error("No se pudo cargar la plantilla Prueba 01.");
     const sourceBuffer = await response.arrayBuffer();
+    const originalZip = await JSZip.loadAsync(sourceBuffer);
     const workbook = XLSX.read(sourceBuffer, { type: "array", cellStyles: true });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
@@ -313,13 +314,48 @@ export async function exportExcel(u, lotName = "") {
       sheet["!autofilter"].ref = XLSX.utils.encode_range(range);
     }
 
+    // SheetJS genera los valores y estilos, pero no conserva todos los dibujos
+    // (por ejemplo, el logo). Por eso usamos su hoja como fuente de celdas y
+    // la insertamos dentro del ZIP ORIGINAL, conservando imágenes y relaciones.
     const output = XLSX.write(workbook, {
       bookType: "xlsx",
       type: "array",
       cellStyles: true,
       compression: true
     });
-    const blob = new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const generatedZip = await JSZip.loadAsync(output);
+    const sheetPath = "xl/worksheets/sheet1.xml";
+    const [originalSheetFile, generatedSheetFile, generatedStylesFile] = await Promise.all([
+      originalZip.file(sheetPath)?.async("string"),
+      generatedZip.file(sheetPath)?.async("string"),
+      generatedZip.file("xl/styles.xml")?.async("string")
+    ]);
+    if (!originalSheetFile || !generatedSheetFile || !generatedStylesFile) {
+      throw new Error("No se pudieron combinar los datos con la plantilla corporativa.");
+    }
+
+    const parser = new DOMParser();
+    const originalDoc = parser.parseFromString(originalSheetFile, "application/xml");
+    const generatedDoc = parser.parseFromString(generatedSheetFile, "application/xml");
+    if (originalDoc.querySelector("parsererror") || generatedDoc.querySelector("parsererror")) {
+      throw new Error("La plantilla o la hoja generada contiene XML no válido.");
+    }
+    const originalRoot = originalDoc.documentElement;
+    const generatedRoot = generatedDoc.documentElement;
+    const graphicElements = new Set(["drawing", "legacyDrawing", "legacyDrawingHF", "picture", "oleObjects", "controls", "webPublishItems"]);
+    for (const node of Array.from(originalRoot.children)) {
+      if (graphicElements.has(node.localName) && !Array.from(generatedRoot.children).some(item => item.localName === node.localName)) {
+        const copy = generatedDoc.importNode(node, true);
+        const ext = Array.from(generatedRoot.children).find(item => item.localName === "extLst");
+        generatedRoot.insertBefore(copy, ext || null);
+      }
+    }
+    const serializer = new XMLSerializer();
+    const mergedSheetXml = serializer.serializeToString(generatedDoc);
+    originalZip.file(sheetPath, mergedSheetXml);
+    originalZip.file("xl/styles.xml", generatedStylesFile);
+    const finalBlob = await originalZip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    const blob = finalBlob;
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
