@@ -966,10 +966,14 @@ $("#copyBtn").onclick=async()=>{
   }
 };
 
-$("#exportExcel").onclick=async()=>
+$("#exportExcel").onclick=async()=>{
+  const lot=await activeLot();
+  if(!lot){alert("Primero crea o selecciona un lote.");return;}
   exportExcel(
-    await unitsForActiveLot()
+    await unitsForActiveLot(),
+    lot.name
   );
+};
 
 $("#importExcel").onclick=async()=>{
   if(!(await requireLot())){
