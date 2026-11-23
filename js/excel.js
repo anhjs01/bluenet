@@ -155,18 +155,14 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
 }
 
 function removeExcelCell(sheetXml, address) {
-  const pattern = new RegExp("<c\\\\b(?=[^>]*\\\\br=\\\"" + address + "\\\")[^>]*(?:\\\\/>|>[\\\\s\\\\S]*?<\\\\/c>)");
-  return sheetXml.replace(pattern, "");
-}
-function safeExcelFileName(value) {");
-  const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${escaped}")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`);
+  const pattern = new RegExp('<c\\b(?=[^>]*\\br="' + address + '")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)');
   return sheetXml.replace(pattern, "");
 }
 
 function safeExcelFileName(value) {
   const cleaned = String(value ?? "")
     .normalize("NFC")
-    .replace(/[\\\\/:*?"<>|\u0000-\u001F]/g, "-")
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, "-")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")
     .trim();
