@@ -154,11 +154,17 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
   return sheetXml.slice(0, rowMatch.index) + updatedRow + sheetXml.slice(rowMatch.index + rowXml.length);
 }
 
+function removeExcelCell(sheetXml, address) {
+  const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\function safeExcelFileName(value) {");
+  const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${escaped}")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`);
+  return sheetXml.replace(pattern, "");
+}
+
 function safeExcelFileName(value) {
-  const cleaned = String(value || "")
+  const cleaned = String(value ?? "")
     .normalize("NFC")
-    .replace(/[\\/:*?"<>|\\u0000-\\u001F]/g, "-")
-    .replace(/\\s+/g, " ")
+    .replace(/[\\\\/:*?"<>|\u0000-\u001F]/g, "-")
+    .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "")
     .trim();
   return (cleaned || "conteo-rapido-remision") + ".xlsx";
@@ -188,12 +194,36 @@ export async function exportExcel(u, lotName = "") {
     sheetXml = setExcelCell(sheetXml, "B3", null);
     sheetXml = setExcelCell(sheetXml, "G3", null);
 
+    // La tabla de remisión usa exactamente ocho columnas, como en el formato de referencia.
+    const tableHeaders = [
+      "ARTÍCULO",
+      "SIN ETIQUETA",
+      "N/S",
+      "MARCA",
+      "SOLICITUD DE REPARACIÓN",
+      "BARCODE / MANUAL",
+      "TIPO DE MANTENIMIENTO",
+      "FECHA DE ENTREGA"
+    ];
+    const tableColumns = ["B", "C", "D", "E", "F", "G", "H", "I"];
+    for (let i = 0; i < tableHeaders.length; i++) {
+      sheetXml = setExcelCell(sheetXml, `${tableColumns[i]}23`, tableHeaders[i]);
+    }
+
+    // Quitar las cuatro columnas adicionales del formato anterior en el área de la tabla.
+    const existingTableEnd = Number((sheetXml.match(/<dimension\\b[^>]*\\bref="[A-Z]+\\d+:[A-Z]+(\\d+)"/) || [null, "221"])[1]);
+    for (let r = 23; r <= existingTableEnd; r++) {
+      for (const col of ["J", "K", "L", "M"]) {
+        sheetXml = removeExcelCell(sheetXml, `${col}${r}`);
+      }
+    }
+
     // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
     // Así se conservan sin reconstruir el libro: logo, imágenes, colores, combinaciones,
     // bordes, dimensiones, impresión, estilos y todo el encabezado institucional.
     const firstDataRow = 24;
     const lastExistingRow = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
-    const lastDataCol = 12; // L
+    const lastDataCol = 9; // I: ocho columnas visibles B:I
     const colName = number => {
       let n = number;
       let name = "";
@@ -247,12 +277,9 @@ export async function exportExcel(u, lotName = "") {
         String(x.unitId || ""),
         x.manufacturer || "",
         excelSerialDate(x.lotDate),
-        isDelivered ? excelSerialDate(x.deliveryDate || x.deliveredAt || "") : null,
-        warrantyExpiration(x, isDelivered),
-        x.diagnosis || "",
-        x.repairable === true ? "Sí" : x.repairable === false ? "No" : "",
+        x.readType || "",
         (x.repairs || []).join(" + "),
-        obs
+        excelSerialDate(x.deliveryDate || x.deliveredAt || "")
       ];
       for (let j = 0; j < values.length; j++) {
         const col = colName(j + 2);
