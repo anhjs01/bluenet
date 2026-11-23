@@ -119,6 +119,9 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
   let attributes = existing
     ? (existing[0].match(/^<c\b([^>]*)/) || [null, ""])[1]
     : ` r="${address}"${styleFallback}`;
+  if (styleFallback) {
+    attributes = attributes.replace(/\s+s="[^"]*"/g, "") + styleFallback;
+  }
   attributes = attributes
     .replace(/\s+t="[^"]*"/g, "")
     .replace(/\s+cm="[^"]*"/g, "")
@@ -164,6 +167,24 @@ function safeExcelFileName(value) {
   return (cleaned || "conteo-rapido-remision") + ".xlsx";
 }
 
+async function createTahomaCenteredStyle(zip) {
+  const file = zip.file("xl/styles.xml");
+  if (!file) throw new Error("La plantilla no contiene los estilos de Excel.");
+  let xml = await file.async("string");
+  const fontsTag = xml.match(/<fonts\b[^>]*>/);
+  const xfsTag = xml.match(/<cellXfs\b[^>]*>/);
+  if (!fontsTag || !xfsTag) throw new Error("No se pudieron preparar los estilos de la plantilla.");
+  const fontId = Number((fontsTag[0].match(/count="(\d+)"/) || [null, "0"])[1]);
+  const styleId = Number((xfsTag[0].match(/count="(\d+)"/) || [null, "0"])[1]);
+  xml = xml.replace(fontsTag[0], fontsTag[0].replace(/count="\d+"/, `count="${fontId + 1}"`));
+  xml = xml.replace("</fonts>", `<font><sz val="5"/><name val="Tahoma"/><family val="2"/></font></fonts>`);
+  const updatedXfsTag = xml.match(/<cellXfs\b[^>]*>/)[0];
+  xml = xml.replace(updatedXfsTag, updatedXfsTag.replace(/count="\d+"/, `count="${styleId + 1}"`));
+  xml = xml.replace("</cellXfs>", `<xf numFmtId="0" fontId="${fontId}" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf></cellXfs>`);
+  zip.file("xl/styles.xml", xml);
+  return ` s="${styleId}"`;
+}
+
 function shiftWorksheetRows(xml, startRow, offset) {
   if (!offset) return xml;
   const shiftRefs = value => value.replace(/(\$?[A-Z]{1,3}\$?)(\d+)/g, (match, column, row) => {
@@ -198,9 +219,9 @@ export async function exportExcel(u, lotName = "") {
       (row || []).slice(0, 8).forEach((value, index) => {
         const h = normalize(value);
         if (/articulo|article|artic/.test(h)) found.article = index;
-        else if (/serie|serial|s n|nro.*serie|numero.*de.*serie/.test(h)) found.serial = index;
+        else if (/serie|serial|n s|ns|numero.*serie/.test(h)) found.serial = index;
         else if (/marca|fabricante|brand/.test(h)) found.brand = index;
-        else if (/solicitud.*reparacion|solicitud|ticket|request/.test(h)) found.request = index;
+        else if (/sin|ticket|solicitud|request/.test(h)) found.request = index;
         else if (/tipo.*mantenimiento|mantenimiento|maintenance/.test(h)) found.maintenance = index;
         else if (/fecha.*entrega|fecha entrega|delivery date|delivery/.test(h)) found.delivery = index;
       });
@@ -215,6 +236,9 @@ export async function exportExcel(u, lotName = "") {
       alternatives.sort((a, b) => countHeaders(b.found) - countHeaders(a.found));
       if (countHeaders(alternatives[0]?.found || {}) > countHeaders(headerColumns)) headerColumns = alternatives[0].found;
     }
+    // En Prueba 01, la columna F identifica el método de lectura y G la reparación.
+    headerColumns.readType = 5;
+    headerColumns.maintenance = 6;
     // Si la plantilla usa un título no estándar para el número de serie,
     // inferir la columna inmediatamente posterior a "Artículo" solo si está libre.
     if (headerColumns.serial === undefined && headerColumns.article !== undefined) {
@@ -254,19 +278,30 @@ export async function exportExcel(u, lotName = "") {
       return name;
     };
 
+    const uniformStyle = await createTahomaCenteredStyle(sourceZip);
     const fallbackStyles = {};
     for (let c = 1; c <= lastDataCol; c++) {
       const col = colName(c);
-      fallbackStyles[col] = excelCellStyle(sheetXml, col + firstDataRow);
+      fallbackStyles[col] = uniformStyle || excelCellStyle(sheetXml, col + firstDataRow);
     }
 
     const templateRowMatch = sheetXml.match(new RegExp('<row\\b(?=[^>]*\\br="' + firstDataRow + '")[^>]*>[\\s\\S]*?<\\/row>'));
     const templateRowXml = templateRowMatch?.[0] || "";
     if (!templateRowXml) throw new Error("No se encontró la fila 6 para extender el formato de la plantilla.");
 
-    // Si hay más de 60 unidades, insertar filas antes del bloque reservado 66–68.
-    // El contenido y el formato del bloque inferior se desplazan juntos, sin sobrescribirlos.
-    const extraRowsCount = Math.max(0, u.length - (lastExistingRow - firstDataRow + 1));
+    // Ajustar la plantilla a la cantidad exacta de unidades: eliminar filas vacías
+    // cuando hay menos de 60 y desplazar el pie; insertar filas si hay más.
+    const baseCapacity = lastExistingRow - firstDataRow + 1;
+    const extraRowsCount = Math.max(0, u.length - baseCapacity);
+    const unusedRowsCount = Math.max(0, baseCapacity - u.length);
+    if (unusedRowsCount) {
+      const firstUnusedRow = firstDataRow + u.length;
+      sheetXml = sheetXml.replace(/<row\\b[^>]*>[\\s\\S]*?<\\/row>/g, rowXml => {
+        const rowId = Number((rowXml.match(/^<row\\b[^>]*\\br="(\\d+)"/) || [null, "0"])[1]);
+        return rowId >= firstUnusedRow && rowId <= lastExistingRow ? "" : rowXml;
+      });
+      sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, -unusedRowsCount);
+    }
     if (extraRowsCount) {
       sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, extraRowsCount);
       const extraRows = [];
@@ -299,11 +334,12 @@ export async function exportExcel(u, lotName = "") {
       article: unit.sequence ?? index + 1,
       serial: String(unit.unitId || ""),
       brand: unit.manufacturer || "",
-      request: unit.ticket || unit.observations || "",
-      maintenance: (unit.repairs || []).join(" + ") || unit.diagnosis || "",
+      request: unit.ticket || "",
+      readType: /manual/i.test(String(unit.readType || "")) ? "Manual" : "Barcode",
+      maintenance: (unit.repairs || []).join(" + "),
       delivery: deliveryDate(unit)
     });
-    const keyToValue = { article: "article", serial: "serial", brand: "brand", request: "request", maintenance: "maintenance", delivery: "delivery" };
+    const keyToValue = { article: "article", serial: "serial", brand: "brand", request: "request", readType: "readType", maintenance: "maintenance", delivery: "delivery" };
 
     for (let i = 0; i < u.length; i++) {
       const row = firstDataRow + i;
