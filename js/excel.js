@@ -183,6 +183,11 @@ export async function exportExcel(u, lotName = "") {
     if (!sheetFile) throw new Error("La plantilla no contiene la hoja Excel esperada.");
     let sheetXml = await sheetFile.async("string");
 
+    // Mantener las etiquetas del encabezado, pero dejar vacíos los datos variables
+    // del cliente y de la empresa para que cada remisión se diligencie manualmente.
+    sheetXml = setExcelCell(sheetXml, "B3", null);
+    sheetXml = setExcelCell(sheetXml, "G3", null);
+
     // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
     // Así se conservan sin reconstruir el libro: logo, imágenes, colores, combinaciones,
     // bordes, dimensiones, impresión, estilos y todo el encabezado institucional.
