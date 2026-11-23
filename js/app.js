@@ -235,6 +235,115 @@ function openAudioTest(withGuide=false){
   );
 }
 
+
+async function openImageGuides(){
+  cleanupAudio();
+  const store="guideImages";
+  let records=(await getAll(store)).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+  let selected=null, imageUrl=null, scale=1, offsetX=0, offsetY=0, dragging=false, startX=0, startY=0, originX=0, originY=0, addMode=false, pendingPoint=null;
+  root.innerHTML=
+    '<div class="modalback"><div class="modal image-guides-modal">'+
+      '<div class="image-guides-header"><div><span class="image-guides-kicker">BIBLIOTECA LOCAL</span><h2>Guías visuales</h2><p class="muted">Imágenes y anotaciones guardadas en este dispositivo.</p></div>'+
+      '<button id="guideClose" class="audio-close" aria-label="Cerrar">×</button></div>'+
+      '<div class="image-guides-toolbar"><button id="guideUploadBtn" class="primary">＋ Subir imágenes</button><input id="guideUpload" type="file" accept="image/*" multiple hidden><span id="guideCount" class="muted"></span></div>'+
+      '<div class="image-guides-layout"><aside class="image-guides-library"><h3>Mis imágenes</h3><div id="guideList"></div></aside>'+
+      '<section class="image-guides-workspace"><div class="image-guides-viewer"><div class="image-guides-viewer-tools"><button id="guideZoomOut" title="Alejar">−</button><button id="guideZoomReset">Ajustar</button><button id="guideZoomIn" title="Acercar">＋</button><button id="guideFullscreen">⛶ Pantalla completa</button><button id="guideAddComment" class="secondary">＋ Comentario</button><button id="guideDelete" class="danger">Eliminar imagen</button></div>'+
+      '<div id="guideStage" class="image-guides-stage"><div id="guideCanvas" class="image-guides-canvas"><img id="guideImage" alt="Imagen de referencia"><div id="guidePins"></div></div><div id="guideEmpty" class="image-guides-empty">Sube una imagen para comenzar tu biblioteca de referencias.</div></div></div>'+
+      '<div class="image-guides-notes"><div><h3 id="guideImageTitle">Selecciona una imagen</h3><p id="guideHelp" class="muted">Puedes ampliar, mover y añadir comentarios numerados sobre cada referencia.</p></div><div id="guideComposer" class="guide-comment-composer hidden"><textarea id="guideCommentText" rows="2" placeholder="Escribe la indicación para este punto…"></textarea><div><button id="guideCommentCancel">Cancelar</button><button id="guideCommentSave" class="primary">Guardar comentario</button></div></div><div id="guideComments" class="guide-comments"></div></div>'+
+      '</section></div></div></div>';
+  const $g=s=>root.querySelector(s);
+  const revoke=()=>{if(imageUrl){URL.revokeObjectURL(imageUrl);imageUrl=null}};
+  const closeGuides=()=>{revoke();close()};
+  const applyTransform=()=>{const canvas=$g("#guideCanvas");if(canvas)canvas.style.transform="translate("+offsetX+"px,"+offsetY+"px) scale("+scale+")"};
+  const updateCount=()=>{$g("#guideCount").textContent=records.length+" imagen"+(records.length===1?"":"es")};
+  const renderList=()=>{
+    $g("#guideList").innerHTML=records.length?records.map(x=>'<button class="guide-library-item '+(selected?.id===x.id?"active":"")+'" data-guide-id="'+esc(x.id)+'"><span class="guide-library-icon">▧</span><span><b>'+esc(x.name)+'</b><small>'+new Date(x.createdAt).toLocaleDateString("es-CO")+' · '+(x.comments||[]).length+' comentarios</small></span></button>').join(""):'<p class="muted guide-empty-list">Todavía no has subido imágenes.</p>';
+    updateCount();
+    $g("#guideList").querySelectorAll("[data-guide-id]").forEach(b=>b.onclick=()=>selectImage(b.dataset.guideId));
+  };
+  const renderComments=()=>{
+    const comments=selected?.comments||[];
+    $g("#guideComments").innerHTML=comments.length?comments.map((c,i)=>'<article class="guide-comment"><span class="guide-comment-number">'+(i+1)+'</span><div><b>Comentario '+(i+1)+'</b><p>'+esc(c.text)+'</p><small>'+new Date(c.createdAt).toLocaleString("es-CO")+'</small></div><button data-delete-comment="'+esc(c.id)+'" title="Eliminar comentario">×</button></article>').join(""):'<p class="muted">Esta imagen todavía no tiene comentarios.</p>';
+    $g("#guideComments").querySelectorAll("[data-delete-comment]").forEach(b=>b.onclick=async()=>{
+      if(!selected)return;
+      selected.comments=(selected.comments||[]).filter(c=>c.id!==b.dataset.deleteComment);
+      await put(store,selected);renderComments();renderPins();renderList();
+    });
+  };
+  const renderPins=()=>{
+    const pins=$g("#guidePins");if(!pins)return;
+    pins.innerHTML=(selected?.comments||[]).map((c,i)=>'<button class="guide-pin" style="left:'+Number(c.x)+'%;top:'+Number(c.y)+'%" title="Comentario '+(i+1)+'">'+(i+1)+'</button>').join("");
+    pins.querySelectorAll(".guide-pin").forEach((b,i)=>b.onclick=e=>{e.stopPropagation();const c=selected.comments[i];$g("#guideHelp").textContent="Comentario "+(i+1)+": "+c.text});
+  };
+  const selectImage=async id=>{
+    selected=records.find(x=>x.id===id)||null;revoke();scale=1;offsetX=0;offsetY=0;addMode=false;pendingPoint=null;
+    $g("#guideComposer").classList.add("hidden");$g("#guideEmpty").classList.toggle("hidden",!!selected);
+    $g("#guideImage").style.display=selected?"block":"none";
+    $g("#guidePins").innerHTML="";
+    $g("#guideImageTitle").textContent=selected?selected.name:"Selecciona una imagen";
+    $g("#guideDelete").disabled=!selected;
+    $g("#guideAddComment").disabled=!selected;
+    if(selected){
+      imageUrl=URL.createObjectURL(selected.blob);
+      const img=$g("#guideImage");img.onload=()=>{
+        const stage=$g("#guideStage"),maxW=Math.max(200,stage.clientWidth-40),maxH=Math.max(180,stage.clientHeight-40);
+        const ratio=Math.min(maxW/img.naturalWidth,maxH/img.naturalHeight,1);
+        const canvas=$g("#guideCanvas");canvas.style.width=(img.naturalWidth*ratio)+"px";canvas.style.height=(img.naturalHeight*ratio)+"px";
+        img.style.width="100%";img.style.height="100%";applyTransform();
+      };
+      img.src=imageUrl;
+      $g("#guideHelp").textContent="Usa la rueda, los botones o el gesto de pellizcar del dispositivo para acercarte. Arrastra para moverte.";
+    }else{$g("#guideHelp").textContent="Puedes ampliar, mover y añadir comentarios numerados sobre cada referencia."}
+    renderPins();renderComments();renderList();
+  };
+  $g("#guideClose").onclick=closeGuides;
+  $g("#guideUploadBtn").onclick=()=>$g("#guideUpload").click();
+  $g("#guideUpload").onchange=async e=>{
+    const files=Array.from(e.target.files||[]);
+    for(const file of files){
+      if(!file.type.startsWith("image/"))continue;
+      const item={id:"guide-"+crypto.randomUUID(),name:file.name,blob:file,comments:[],createdAt:new Date().toISOString()};
+      await put(store,item);records.unshift(item);
+    }
+    e.target.value="";renderList();
+    if(records.length)await selectImage(records[0].id);
+  };
+  $g("#guideDelete").onclick=async()=>{
+    if(!selected||!confirm("¿Eliminar esta imagen y todos sus comentarios?"))return;
+    const id=selected.id;await del(store,id);records=records.filter(x=>x.id!==id);await selectImage(records[0]?.id||"");
+  };
+  $g("#guideAddComment").onclick=()=>{
+    if(!selected)return;
+    addMode=!addMode;pendingPoint=null;
+    $g("#guideAddComment").classList.toggle("active",addMode);
+    $g("#guideHelp").textContent=addMode?"Haz clic o toca el punto exacto de la imagen donde quieres dejar la nota.":"Modo de comentario desactivado.";
+  };
+  $g("#guideStage").onclick=e=>{
+    if(!addMode||!selected||e.target.closest(".guide-pin"))return;
+    const rect=$g("#guideCanvas").getBoundingClientRect();
+    pendingPoint={x:Math.max(0,Math.min(100,(e.clientX-rect.left)/rect.width*100)),y:Math.max(0,Math.min(100,(e.clientY-rect.top)/rect.height*100))};
+    $g("#guideComposer").classList.remove("hidden");$g("#guideCommentText").focus();
+  };
+  $g("#guideCommentCancel").onclick=()=>{$g("#guideComposer").classList.add("hidden");pendingPoint=null};
+  $g("#guideCommentSave").onclick=async()=>{
+    const value=$g("#guideCommentText").value.trim();
+    if(!value||!pendingPoint)return;
+    selected.comments=selected.comments||[];
+    selected.comments.push({id:"comment-"+crypto.randomUUID(),text:value,x:pendingPoint.x,y:pendingPoint.y,createdAt:new Date().toISOString()});
+    await put(store,selected);$g("#guideCommentText").value="";$g("#guideComposer").classList.add("hidden");pendingPoint=null;addMode=false;$g("#guideAddComment").classList.remove("active");renderPins();renderComments();renderList();
+  };
+  $g("#guideZoomIn").onclick=()=>{scale=Math.min(5,scale*1.25);applyTransform()};
+  $g("#guideZoomOut").onclick=()=>{scale=Math.max(.5,scale/1.25);applyTransform()};
+  $g("#guideZoomReset").onclick=()=>{scale=1;offsetX=0;offsetY=0;applyTransform()};
+  $g("#guideFullscreen").onclick=async()=>{const stage=$g("#guideStage");try{if(!document.fullscreenElement)await stage.requestFullscreen();else await document.exitFullscreen()}catch{alert("El navegador no permitió abrir la imagen en pantalla completa.")}};
+  $g("#guideStage").onwheel=e=>{if(!selected)return;e.preventDefault();scale=Math.max(.5,Math.min(5,scale*(e.deltaY<0?1.12:.89)));applyTransform()};
+  const canvas=$g("#guideCanvas");
+  canvas.onpointerdown=e=>{if(addMode)return;dragging=true;startX=e.clientX;startY=e.clientY;originX=offsetX;originY=offsetY;canvas.setPointerCapture(e.pointerId)};
+  canvas.onpointermove=e=>{if(!dragging)return;offsetX=originX+e.clientX-startX;offsetY=originY+e.clientY-startY;applyTransform()};
+  canvas.onpointerup=canvas.onpointercancel=()=>{dragging=false};
+  renderList();await selectImage(records[0]?.id||"");
+}
+
 async function requireLot(){
   if(await activeLot())return true;
 
@@ -881,6 +990,7 @@ $("#scanBtn").onclick=async()=>{
 
 $("#audioTestBtn").onclick=()=>openAudioTest(false);
 $("#audioGuideBtn").onclick=()=>openAudioTest(true);
+$("#imageGuidesBtn").onclick=openImageGuides;
 
 $("#manualBtn").onclick=async()=>{
   if(await requireLot()){
