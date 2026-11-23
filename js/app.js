@@ -241,6 +241,12 @@ async function openImageGuides(){
   const store="guideImages";
   let records=(await getAll(store)).sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
   let selected=null, imageUrl=null, scale=1, offsetX=0, offsetY=0, dragging=false, startX=0, startY=0, originX=0, originY=0, addMode=false, pendingPoint=null;
+  const thumbnailUrls=new Map();
+  const thumbnailUrl=record=>{
+    if(!thumbnailUrls.has(record.id)) thumbnailUrls.set(record.id,URL.createObjectURL(record.blob));
+    return thumbnailUrls.get(record.id);
+  };
+  const revokeThumbnails=()=>{for(const url of thumbnailUrls.values())URL.revokeObjectURL(url);thumbnailUrls.clear()};
   root.innerHTML=
     '<div class="modalback"><div class="modal image-guides-modal">'+
       '<div class="image-guides-header"><div><span class="image-guides-kicker">BIBLIOTECA LOCAL</span><h2>Guías visuales</h2><p class="muted">Imágenes y anotaciones guardadas en este dispositivo.</p></div>'+
@@ -253,11 +259,11 @@ async function openImageGuides(){
       '</section></div></div></div>';
   const $g=s=>root.querySelector(s);
   const revoke=()=>{if(imageUrl){URL.revokeObjectURL(imageUrl);imageUrl=null}};
-  const closeGuides=()=>{revoke();close()};
+  const closeGuides=()=>{revoke();revokeThumbnails();close()};
   const applyTransform=()=>{const canvas=$g("#guideCanvas");if(canvas)canvas.style.transform="translate("+offsetX+"px,"+offsetY+"px) scale("+scale+")"};
   const updateCount=()=>{$g("#guideCount").textContent=records.length+" imagen"+(records.length===1?"":"es")};
   const renderList=()=>{
-    $g("#guideList").innerHTML=records.length?records.map(x=>'<button class="guide-library-item '+(selected?.id===x.id?"active":"")+'" data-guide-id="'+esc(x.id)+'"><span class="guide-library-icon">▧</span><span><b>'+esc(x.name)+'</b><small>'+new Date(x.createdAt).toLocaleDateString("es-CO")+' · '+(x.comments||[]).length+' comentarios</small></span></button>').join(""):'<p class="muted guide-empty-list">Todavía no has subido imágenes.</p>';
+    $g("#guideList").innerHTML=records.length?records.map(x=>'<button class="guide-library-item '+(selected?.id===x.id?"active":"")+'" data-guide-id="'+esc(x.id)+'"><img class="guide-library-thumb" src="'+thumbnailUrl(x)+'" alt="Vista previa de '+esc(x.name)+'"><span class="guide-library-meta"><b>'+esc(x.name)+'</b><small>'+new Date(x.createdAt).toLocaleDateString("es-CO")+' · '+(x.comments||[]).length+' comentarios</small></span></button>').join(""):'<p class="muted guide-empty-list">Todavía no has subido imágenes.</p>';
     updateCount();
     $g("#guideList").querySelectorAll("[data-guide-id]").forEach(b=>b.onclick=()=>selectImage(b.dataset.guideId));
   };
@@ -310,7 +316,7 @@ async function openImageGuides(){
   };
   $g("#guideDelete").onclick=async()=>{
     if(!selected||!confirm("¿Eliminar esta imagen y todos sus comentarios?"))return;
-    const id=selected.id;await del(store,id);records=records.filter(x=>x.id!==id);await selectImage(records[0]?.id||"");
+    const id=selected.id;await del(store,id);records=records.filter(x=>x.id!==id);const thumbUrl=thumbnailUrls.get(id);if(thumbUrl)URL.revokeObjectURL(thumbUrl);thumbnailUrls.delete(id);await selectImage(records[0]?.id||"");
   };
   $g("#guideAddComment").onclick=()=>{
     if(!selected)return;
