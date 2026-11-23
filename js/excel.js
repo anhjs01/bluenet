@@ -119,9 +119,6 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
   let attributes = existing
     ? (existing[0].match(/^<c\b([^>]*)/) || [null, ""])[1]
     : ` r="${address}"${styleFallback}`;
-  if (styleFallback) {
-    attributes = attributes.replace(/\s+s="[^"]*"/g, "") + styleFallback;
-  }
   attributes = attributes
     .replace(/\s+t="[^"]*"/g, "")
     .replace(/\s+cm="[^"]*"/g, "")
@@ -167,213 +164,100 @@ function safeExcelFileName(value) {
   return (cleaned || "conteo-rapido-remision") + ".xlsx";
 }
 
-async function createTahomaCenteredStyle(zip) {
-  const file = zip.file("xl/styles.xml");
-  if (!file) throw new Error("La plantilla no contiene los estilos de Excel.");
-  let xml = await file.async("string");
-  const fontsTag = xml.match(/<fonts\b[^>]*>/);
-  const xfsTag = xml.match(/<cellXfs\b[^>]*>/);
-  if (!fontsTag || !xfsTag) throw new Error("No se pudieron preparar los estilos de la plantilla.");
-  const fontId = Number((fontsTag[0].match(/count="(\d+)"/) || [null, "0"])[1]);
-  const styleId = Number((xfsTag[0].match(/count="(\d+)"/) || [null, "0"])[1]);
-  xml = xml.replace(fontsTag[0], fontsTag[0].replace(/count="\d+"/, `count="${fontId + 1}"`));
-  xml = xml.replace("</fonts>", `<font><sz val="5"/><name val="Tahoma"/><family val="2"/></font></fonts>`);
-  const updatedXfsTag = xml.match(/<cellXfs\b[^>]*>/)[0];
-  xml = xml.replace(updatedXfsTag, updatedXfsTag.replace(/count="\d+"/, `count="${styleId + 1}"`));
-  xml = xml.replace("</cellXfs>", `<xf numFmtId="0" fontId="${fontId}" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf></cellXfs>`);
-  zip.file("xl/styles.xml", xml);
-  return ` s="${styleId}"`;
-}
-
-function shiftWorksheetRows(xml, startRow, offset) {
-  if (!offset) return xml;
-  const shiftRefs = value => value.replace(/(\$?[A-Z]{1,3}\$?)(\d+)/g, (match, column, row) => {
-    const number = Number(row);
-    return column + (number >= startRow ? number + offset : number);
-  });
-  xml = xml.replace(/\br="(\d+)"/g, (match, row) => {
-    const number = Number(row);
-    return number >= startRow ? 'r="' + (number + offset) + '"' : match;
-  });
-  xml = xml.replace(/\bref="([^"]+)"/g, (match, ref) => 'ref="' + shiftRefs(ref) + '"');
-  xml = xml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (match, attrs, formula) => '<f' + attrs + '>' + shiftRefs(formula) + '</f>');
-  return xml;
-}
-
 export async function exportExcel(u, lotName = "") {
-  if (!window.XLSX || !window.JSZip) return alert("No están disponibles los módulos necesarios para conservar la plantilla Excel original.");
+  if (!window.JSZip) return alert("No está disponible el módulo necesario para conservar la plantilla Excel original.");
+
+  let sourceZip;
+  try {
+    const response = await fetch("./guias/plantilla-remision-tabla.xlsx", { cache: "no-store" });
+    if (!response.ok) throw new Error("No se pudo cargar la plantilla final de remisión.");
+    sourceZip = await JSZip.loadAsync(await response.arrayBuffer());
+  } catch (error) {
+    alert("No se pudo preparar el Excel institucional. Comprueba que la carpeta guias esté junto a la aplicación y vuelve a intentarlo.\n" + (error.message || ""));
+    return;
+  }
 
   try {
-    const response = await fetch("./guias/prueba01.xlsx", { cache: "no-store" });
-    if (!response.ok) throw new Error("No se pudo cargar la plantilla Prueba 01.");
-    const sourceBuffer = await response.arrayBuffer();
-    const originalZip = await JSZip.loadAsync(sourceBuffer);
-    const workbook = XLSX.read(sourceBuffer, { type: "array", cellStyles: true });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) throw new Error("La plantilla no contiene una hoja válida.");
+    const sheetPath = "xl/worksheets/sheet1.xml";
+    const sheetFile = sourceZip.file(sheetPath);
+    if (!sheetFile) throw new Error("La plantilla no contiene la hoja Excel esperada.");
+    let sheetXml = await sheetFile.async("string");
 
-    // Columnas confirmadas de Prueba 01: A artículo, B SIN/ticket,
-    // C fabricante, D N-S/serial, F lectura, G reparación, H entrega.
-    const columns = { article: 0, request: 1, brand: 2, serial: 3, readType: 5, maintenance: 6, delivery: 7 };
-    const firstDataIndex = 5; // Fila 6 en Excel.
-    const originalLastDataIndex = 64; // Fila 65 en Excel.
-    const footerStartIndex = 65; // Fila 66 en Excel.
-    const units = Array.isArray(u) ? u : [];
-    const rowDelta = units.length - 60;
-
-    const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
-    const originalRows = sheet["!rows"] ? sheet["!rows"].slice() : [];
-    const templateRowMeta = clone(originalRows[firstDataIndex]);
-    // Guardar el formato de cada fila original, no solo el de la primera:
-    // así se respetan también bandas de color y estilos alternos de la plantilla.
-    const rowStyles = Array.from({ length: originalLastDataIndex - firstDataIndex + 1 }, (_, offset) => {
-      const styles = {};
-      for (let col = 0; col < 8; col++) {
-        const address = XLSX.utils.encode_cell({ r: firstDataIndex + offset, c: col });
-        styles[col] = clone(sheet[address]?.s) || {};
+    // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
+    // Así se conservan sin reconstruir el libro: logo, imágenes, colores, combinaciones,
+    // bordes, dimensiones, impresión, estilos y todo el encabezado institucional.
+    const firstDataRow = 24;
+    const lastExistingRow = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
+    const lastDataCol = 12; // L
+    const colName = number => {
+      let n = number;
+      let name = "";
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        name = String.fromCharCode(65 + rem) + name;
+        n = Math.floor((n - 1) / 26);
       }
-      return styles;
-    });
-
-    // Eliminar únicamente el bloque de captura anterior y desplazar el pie
-    // de plantilla para que quede inmediatamente después del número real de unidades.
-    const cellKeys = Object.keys(sheet).filter(key => !key.startsWith("!"));
-    const footerCells = [];
-    for (const key of cellKeys) {
-      const point = XLSX.utils.decode_cell(key);
-      if (point.r >= firstDataIndex && point.r <= originalLastDataIndex) {
-        delete sheet[key];
-      } else if (point.r >= footerStartIndex && rowDelta !== 0) {
-        footerCells.push({
-          address: XLSX.utils.encode_cell({ r: point.r + rowDelta, c: point.c }),
-          value: sheet[key]
-        });
-        delete sheet[key];
-      }
-    }
-    for (const item of footerCells) sheet[item.address] = item.value;
-
-    if (Array.isArray(sheet["!merges"]) && rowDelta !== 0) {
-      sheet["!merges"] = sheet["!merges"].map(range => {
-        const moved = clone(range);
-        if (moved.s.r >= footerStartIndex) moved.s.r += rowDelta;
-        if (moved.e.r >= footerStartIndex) moved.e.r += rowDelta;
-        return moved;
-      });
-    }
-
-    if (originalRows.length) {
-      const footerRows = originalRows.slice(footerStartIndex);
-      const dataRows = Array.from({ length: units.length }, (_, index) => clone(originalRows[firstDataIndex + index] || templateRowMeta));
-      sheet["!rows"] = originalRows.slice(0, firstDataIndex).concat(dataRows, footerRows);
-    }
-
-    const setCell = (rowIndex, columnIndex, value) => {
-      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
-      const existing = sheet[address] || {};
-      const baseStyle = rowStyles[rowIndex - firstDataIndex]?.[columnIndex]
-        || rowStyles[0]?.[columnIndex]
-        || {};
-      // Mantener intacto el estilo de la plantilla: fuente, tamaño, negrita,
-      // color, relleno, bordes y alineación originales de esa fila y columna.
-      if (baseStyle && Object.keys(baseStyle).length) existing.s = clone(baseStyle);
-      if (value === null || value === undefined || value === "") {
-        existing.t = "s";
-        existing.v = "";
-      } else if (typeof value === "number" && Number.isFinite(value)) {
-        existing.t = "n";
-        existing.v = value;
-      } else {
-        existing.t = "s";
-        existing.v = String(value);
-      }
-      delete existing.w;
-      delete existing.f;
-      sheet[address] = existing;
+      return name;
     };
 
-    const toDateSerial = unit => excelSerialDate(unit.deliveryDate || unit.deliveredAt || "");
-    units.forEach((unit, index) => {
-      const row = firstDataIndex + index;
-      setCell(row, columns.article, unit.sequence ?? index + 1);
-      setCell(row, columns.request, unit.ticket || "");
-      setCell(row, columns.brand, unit.manufacturer || "");
-      setCell(row, columns.serial, String(unit.unitId || ""));
-      setCell(row, columns.readType, /manual/i.test(String(unit.readType || "")) ? "Manual" : "Barcode");
-      setCell(row, columns.maintenance, (unit.repairs || []).join(" + "));
-      setCell(row, columns.delivery, toDateSerial(unit));
-    });
+    // Capturar los estilos de la primera fila de datos para poder extender la tabla si hace falta.
+    const fallbackStyles = {};
+    for (let c = 2; c <= lastDataCol; c++) fallbackStyles[colName(c)] = excelCellStyle(sheetXml, `${colName(c)}${firstDataRow}`);
 
-    const used = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 67, c: 7 } };
-    used.e.r = Math.max(used.e.r + rowDelta, firstDataIndex + Math.max(0, units.length - 1), 67 + rowDelta);
-    used.e.c = Math.max(used.e.c, 7);
-    sheet["!ref"] = XLSX.utils.encode_range(used);
-
-    // Mantener el área de impresión y autofiltro alineados si existen.
-    if (sheet["!autofilter"]?.ref && rowDelta !== 0) {
-      const range = XLSX.utils.decode_range(sheet["!autofilter"].ref);
-      if (range.s.r >= footerStartIndex) range.s.r += rowDelta;
-      if (range.e.r >= footerStartIndex) range.e.r += rowDelta;
-      sheet["!autofilter"].ref = XLSX.utils.encode_range(range);
+    // Vaciar solo los valores de muestra de la tabla; no se toca ninguna celda de la remisión (filas 1-21)
+    // ni los encabezados de la tabla (fila 23). Los estilos originales de las celdas se mantienen.
+    for (let r = firstDataRow; r <= lastExistingRow; r++) {
+      for (let c = 2; c <= lastDataCol; c++) {
+        sheetXml = setExcelCell(sheetXml, `${colName(c)}${r}`, null, fallbackStyles[colName(c)]);
+      }
     }
 
-    // SheetJS genera los valores y estilos, pero no conserva todos los dibujos
-    // (por ejemplo, el logo). Por eso usamos su hoja como fuente de celdas y
-    // la insertamos dentro del ZIP ORIGINAL, conservando imágenes y relaciones.
-    const output = XLSX.write(workbook, {
-      bookType: "xlsx",
-      type: "array",
-      cellStyles: true,
-      compression: true
-    });
-    const generatedZip = await JSZip.loadAsync(output);
-    const sheetPath = "xl/worksheets/sheet1.xml";
-    const [originalSheetFile, generatedSheetFile, generatedStylesFile] = await Promise.all([
-      originalZip.file(sheetPath)?.async("string"),
-      generatedZip.file(sheetPath)?.async("string"),
-      generatedZip.file("xl/styles.xml")?.async("string")
-    ]);
-    if (!originalSheetFile || !generatedSheetFile || !generatedStylesFile) {
-      throw new Error("No se pudieron combinar los datos con la plantilla corporativa.");
+    const rowXmlMatch = sheetXml.match(new RegExp(`<row\\b(?=[^>]*\\br="${firstDataRow}")[^>]*>[\\s\\S]*?<\\/row>`));
+    const templateRowXml = rowXmlMatch?.[0] || "";
+    const neededLastRow = firstDataRow + Math.max(0, u.length - 1);
+    if (neededLastRow > lastExistingRow && templateRowXml) {
+      const sheetDataEnd = sheetXml.indexOf("</sheetData>");
+      const extraRows = [];
+      for (let r = lastExistingRow + 1; r <= neededLastRow; r++) {
+        let clone = templateRowXml.replace(/\br="24"/g, `r="${r}"`);
+        for (let c = 2; c <= lastDataCol; c++) clone = setExcelCell(clone, `${colName(c)}${r}`, null, fallbackStyles[colName(c)]);
+        extraRows.push(clone);
+      }
+      sheetXml = sheetXml.slice(0, sheetDataEnd) + extraRows.join("") + sheetXml.slice(sheetDataEnd);
+      sheetXml = sheetXml.replace(/(<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, (_match, prefix, suffix) => `${prefix}${neededLastRow}${suffix}`);
     }
 
-    const parser = new DOMParser();
-    const originalDoc = parser.parseFromString(originalSheetFile, "application/xml");
-    const generatedDoc = parser.parseFromString(generatedSheetFile, "application/xml");
-    if (originalDoc.querySelector("parsererror") || generatedDoc.querySelector("parsererror")) {
-      throw new Error("La plantilla o la hoja generada contiene XML no válido.");
+    for (let i = 0; i < u.length; i++) {
+      const r = firstDataRow + i;
+      const x = u[i];
+      const isDelivered = delivered(x);
+      const originalObs = String(x.observations || "").trim();
+      const obs = isDelivered
+        ? (/^ENTREGADO(?:\s|·|$)/i.test(originalObs) ? originalObs : ["ENTREGADO", originalObs].filter(Boolean).join(" · "))
+        : originalObs.replace(/^ENTREGADO(?:\s*·\s*|\s+)?/i, "").trim();
+
+      const values = [
+        x.sequence ?? i + 1,
+        x.ticket || "",
+        String(x.unitId || ""),
+        x.manufacturer || "",
+        excelSerialDate(x.lotDate),
+        isDelivered ? excelSerialDate(x.deliveryDate || x.deliveredAt || "") : null,
+        warrantyExpiration(x, isDelivered),
+        x.diagnosis || "",
+        x.repairable === true ? "Sí" : x.repairable === false ? "No" : "",
+        (x.repairs || []).join(" + "),
+        obs
+      ];
+      for (let j = 0; j < values.length; j++) {
+        const col = colName(j + 2);
+        sheetXml = setExcelCell(sheetXml, `${col}${r}`, values[j], fallbackStyles[col]);
+      }
     }
 
-    // La plantilla original es la autoridad visual. Solo sustituimos sheetData
-    // (las filas/celdas con los datos) y actualizamos su dimensión. Así se
-    // mantienen literalmente sus dibujos, logo, configuración de impresión,
-    // filas/columnas, combinaciones, filtros, vistas y demás propiedades.
-    const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-    const originalRoot = originalDoc.documentElement;
-    const generatedRoot = generatedDoc.documentElement;
-    const originalData = originalRoot.getElementsByTagNameNS(ns, "sheetData")[0];
-    const generatedData = generatedRoot.getElementsByTagNameNS(ns, "sheetData")[0];
-    if (!originalData || !generatedData) {
-      throw new Error("No se encontró el bloque de datos de la plantilla o de la hoja generada.");
-    }
-    const importedData = originalDoc.importNode(generatedData, true);
-    originalData.parentNode.replaceChild(importedData, originalData);
-
-    const originalDimension = originalRoot.getElementsByTagNameNS(ns, "dimension")[0];
-    const generatedDimension = generatedRoot.getElementsByTagNameNS(ns, "dimension")[0];
-    if (originalDimension && generatedDimension) {
-      originalDimension.setAttribute("ref", generatedDimension.getAttribute("ref"));
-    }
-
-    const serializer = new XMLSerializer();
-    const mergedSheetXml = serializer.serializeToString(originalDoc);
-    originalZip.file(sheetPath, mergedSheetXml);
-    // No sustituir styles.xml: conserva todos los estilos corporativos originales.
-
-    const finalBlob = await originalZip.generateAsync({ type: "blob", compression: "DEFLATE" });
-    const blob = finalBlob;
-    const url = URL.createObjectURL(blob);
+    sourceZip.file(sheetPath, sheetXml);
+    const finalBlob = await sourceZip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    const url = URL.createObjectURL(finalBlob);
     const link = document.createElement("a");
     link.href = url;
     link.download = safeExcelFileName(lotName);
@@ -382,8 +266,8 @@ export async function exportExcel(u, lotName = "") {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
-    console.error("Error al generar el Excel con Prueba 01:", error);
-    alert("No se pudo generar el Excel. No se descargó un archivo incompleto.\n" + (error.message || ""));
+    console.error("Error al generar el Excel conservando la plantilla original:", error);
+    alert("No se pudo generar el Excel conservando intacto el diseño de la remisión. No se descargó un archivo incompleto.\n" + (error.message || ""));
   }
 }
 
