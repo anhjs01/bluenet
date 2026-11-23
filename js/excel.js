@@ -306,7 +306,7 @@ export async function exportExcel(u, lotName = "") {
       sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, extraRowsCount);
       const extraRows = [];
       for (let row = firstInsertRow; row < firstInsertRow + extraRowsCount; row++) {
-        let clone = templateRowXml.replace(/\br="6"/g, 'r="' + row + '"');
+        let clone = templateRowXml.replace(/\br="6"/g, 'r="' + row + '"').replace(/\br="([A-Z]+)6"/g, 'r="$1' + row + '"');
         for (let c = 1; c <= lastDataCol; c++) {
           const col = colName(c);
           clone = setExcelCell(clone, col + row, null, fallbackStyles[col]);
