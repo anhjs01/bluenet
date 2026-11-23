@@ -155,22 +155,22 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
 }
 
 function addExcelMergeRanges(sheetXml, ranges) {
-  const match = sheetXml.match(/<mergeCells\\b[^>]*>[\\s\\S]*?<\\/mergeCells>/);
+  const match = sheetXml.match(/<mergeCells\b[^>]*>[\s\S]*?<\/mergeCells>/);
   const existingBlock = match?.[0] || "";
-  const existingRefs = new Set([...existingBlock.matchAll(/<mergeCell\\b[^>]*\\bref="([^"]+)"/g)].map(item => item[1]));
+  const existingRefs = new Set([...existingBlock.matchAll(/<mergeCell\b[^>]*\bref="([^"]+)"/g)].map(item => item[1]));
   const missing = ranges.filter(range => !existingRefs.has(range));
   if (!missing.length) return sheetXml;
 
-  const newTags = missing.map(range => \`<mergeCell ref="\${range}"/>\`).join("");
+  const newTags = missing.map(range => '<mergeCell ref="' + range + '"/>').join("");
   if (existingBlock) {
     const total = existingRefs.size + missing.length;
     let updated = existingBlock.replace("</mergeCells>", newTags + "</mergeCells>");
-    if (/\\bcount="\\d+"/.test(updated)) updated = updated.replace(/\\bcount="\\d+"/, \`count="\${total}"\`);
-    else updated = updated.replace("<mergeCells", \`<mergeCells count="\${total}"\`);
+    if (/\bcount="\d+"/.test(updated)) updated = updated.replace(/\bcount="\d+"/, 'count="' + total + '"');
+    else updated = updated.replace("<mergeCells", '<mergeCells count="' + total + '"');
     return sheetXml.replace(existingBlock, updated);
   }
 
-  const block = \`<mergeCells count="\${missing.length}">\${newTags}</mergeCells>\`;
+  const block = '<mergeCells count="' + missing.length + '">' + newTags + '</mergeCells>';
   return sheetXml.replace("</sheetData>", "</sheetData>" + block);
 }
 
@@ -222,6 +222,10 @@ export async function exportExcel(u, lotName = "") {
     const tableColumns = ["B", "C", "D", "E", "F", "H", "I", "L"];
     for (let i = 0; i < tableHeaders.length; i++) {
       sheetXml = setExcelCell(sheetXml, `${tableColumns[i]}23`, tableHeaders[i]);
+    }
+
+    for (const col of ["G", "J", "K", "M"]) {
+      sheetXml = setExcelCell(sheetXml, `${col}23`, null);
     }
 
     // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
