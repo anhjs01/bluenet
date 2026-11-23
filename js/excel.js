@@ -154,7 +154,17 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
   return sheetXml.slice(0, rowMatch.index) + updatedRow + sheetXml.slice(rowMatch.index + rowXml.length);
 }
 
-export async function exportExcel(u) {
+function safeExcelFileName(value) {
+  const cleaned = String(value || "")
+    .normalize("NFC")
+    .replace(/[\\/:*?"<>|\\u0000-\\u001F]/g, "-")
+    .replace(/\\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  return (cleaned || "conteo-rapido-remision") + ".xlsx";
+}
+
+export async function exportExcel(u, lotName = "") {
   if (!window.JSZip) return alert("No está disponible el módulo necesario para conservar la plantilla Excel original.");
 
   let sourceZip;
@@ -250,7 +260,7 @@ export async function exportExcel(u) {
     const url = URL.createObjectURL(finalBlob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "conteo-rapido-remision.xlsx";
+    link.download = safeExcelFileName(lotName);
     document.body.appendChild(link);
     link.click();
     link.remove();
