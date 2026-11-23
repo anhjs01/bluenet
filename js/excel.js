@@ -155,7 +155,11 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
 }
 
 function removeExcelCell(sheetXml, address) {
-  const escaped = address.replace(/[.*+?^${}()|[\]\\]/g, "\\function safeExcelFileName(value) {");
+  const pattern = new RegExp(\`<c\\\\b(?=[^>]*\\\\br="\${address}")[^>]*(?:\\\\/>|>[\\\\s\\\\S]*?<\\\\/c>)\`);
+  return sheetXml.replace(pattern, "");
+}
+
+function safeExcelFileName(value) {");
   const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${escaped}")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`);
   return sheetXml.replace(pattern, "");
 }
