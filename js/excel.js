@@ -225,11 +225,16 @@ export async function exportExcel(u, lotName = "") {
     const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
     const originalRows = sheet["!rows"] ? sheet["!rows"].slice() : [];
     const templateRowMeta = clone(originalRows[firstDataIndex]);
-    const rowStyles = {};
-    for (let col = 0; col < 8; col++) {
-      const address = XLSX.utils.encode_cell({ r: firstDataIndex, c: col });
-      rowStyles[col] = clone(sheet[address]?.s) || {};
-    }
+    // Guardar el formato de cada fila original, no solo el de la primera:
+    // así se respetan también bandas de color y estilos alternos de la plantilla.
+    const rowStyles = Array.from({ length: originalLastDataIndex - firstDataIndex + 1 }, (_, offset) => {
+      const styles = {};
+      for (let col = 0; col < 8; col++) {
+        const address = XLSX.utils.encode_cell({ r: firstDataIndex + offset, c: col });
+        styles[col] = clone(sheet[address]?.s) || {};
+      }
+      return styles;
+    });
 
     // Eliminar únicamente el bloque de captura anterior y desplazar el pie
     // de plantilla para que quede inmediatamente después del número real de unidades.
@@ -260,16 +265,18 @@ export async function exportExcel(u, lotName = "") {
 
     if (originalRows.length) {
       const footerRows = originalRows.slice(footerStartIndex);
-      const dataRows = Array.from({ length: units.length }, () => clone(templateRowMeta));
+      const dataRows = Array.from({ length: units.length }, (_, index) => clone(originalRows[firstDataIndex + index] || templateRowMeta));
       sheet["!rows"] = originalRows.slice(0, firstDataIndex).concat(dataRows, footerRows);
     }
 
     const setCell = (rowIndex, columnIndex, value) => {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
       const existing = sheet[address] || {};
-      const baseStyle = rowStyles[columnIndex] || {};
+      const baseStyle = rowStyles[rowIndex - firstDataIndex]?.[columnIndex]
+        || rowStyles[0]?.[columnIndex]
+        || {};
       // Mantener intacto el estilo de la plantilla: fuente, tamaño, negrita,
-      // color, relleno, bordes y alineación originales de cada columna.
+      // color, relleno, bordes y alineación originales de esa fila y columna.
       if (baseStyle && Object.keys(baseStyle).length) existing.s = clone(baseStyle);
       if (value === null || value === undefined || value === "") {
         existing.t = "s";
