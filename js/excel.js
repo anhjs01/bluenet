@@ -154,9 +154,24 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
   return sheetXml.slice(0, rowMatch.index) + updatedRow + sheetXml.slice(rowMatch.index + rowXml.length);
 }
 
-function removeExcelCell(sheetXml, address) {
-  const pattern = new RegExp('<c\\b(?=[^>]*\\br="' + address + '")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)');
-  return sheetXml.replace(pattern, "");
+function addExcelMergeRanges(sheetXml, ranges) {
+  const match = sheetXml.match(/<mergeCells\\b[^>]*>[\\s\\S]*?<\\/mergeCells>/);
+  const existingBlock = match?.[0] || "";
+  const existingRefs = new Set([...existingBlock.matchAll(/<mergeCell\\b[^>]*\\bref="([^"]+)"/g)].map(item => item[1]));
+  const missing = ranges.filter(range => !existingRefs.has(range));
+  if (!missing.length) return sheetXml;
+
+  const newTags = missing.map(range => \`<mergeCell ref="\${range}"/>\`).join("");
+  if (existingBlock) {
+    const total = existingRefs.size + missing.length;
+    let updated = existingBlock.replace("</mergeCells>", newTags + "</mergeCells>");
+    if (/\\bcount="\\d+"/.test(updated)) updated = updated.replace(/\\bcount="\\d+"/, \`count="\${total}"\`);
+    else updated = updated.replace("<mergeCells", \`<mergeCells count="\${total}"\`);
+    return sheetXml.replace(existingBlock, updated);
+  }
+
+  const block = \`<mergeCells count="\${missing.length}">\${newTags}</mergeCells>\`;
+  return sheetXml.replace("</sheetData>", "</sheetData>" + block);
 }
 
 function safeExcelFileName(value) {
@@ -204,17 +219,9 @@ export async function exportExcel(u, lotName = "") {
       "TIPO DE MANTENIMIENTO",
       "FECHA DE ENTREGA"
     ];
-    const tableColumns = ["B", "C", "D", "E", "F", "G", "H", "I"];
+    const tableColumns = ["B", "C", "D", "E", "F", "H", "I", "L"];
     for (let i = 0; i < tableHeaders.length; i++) {
       sheetXml = setExcelCell(sheetXml, `${tableColumns[i]}23`, tableHeaders[i]);
-    }
-
-    // Quitar las cuatro columnas adicionales del formato anterior en el área de la tabla.
-    const existingTableEnd = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
-    for (let r = 23; r <= existingTableEnd; r++) {
-      for (const col of ["J", "K", "L", "M"]) {
-        sheetXml = removeExcelCell(sheetXml, `${col}${r}`);
-      }
     }
 
     // Se edita únicamente el XML de las celdas de inventario dentro del XLSX original.
@@ -222,7 +229,7 @@ export async function exportExcel(u, lotName = "") {
     // bordes, dimensiones, impresión, estilos y todo el encabezado institucional.
     const firstDataRow = 24;
     const lastExistingRow = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
-    const lastDataCol = 9; // I: ocho columnas visibles B:I
+    const lastDataCol = 13; // M: ocho columnas visibles repartidas en el ancho B:M
     const colName = number => {
       let n = number;
       let name = "";
@@ -261,6 +268,13 @@ export async function exportExcel(u, lotName = "") {
       sheetXml = sheetXml.replace(/(<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)\d+("\s*\/>)/, (_match, prefix, suffix) => `${prefix}${neededLastRow}${suffix}`);
     }
 
+    const mergeThroughRow = Math.max(lastExistingRow, neededLastRow);
+    const tableMerges = [];
+    for (let r = 23; r <= mergeThroughRow; r++) {
+      tableMerges.push(`F${r}:G${r}`, `I${r}:K${r}`, `L${r}:M${r}`);
+    }
+    sheetXml = addExcelMergeRanges(sheetXml, tableMerges);
+
     for (let i = 0; i < u.length; i++) {
       const r = firstDataRow + i;
       const x = u[i];
@@ -280,8 +294,9 @@ export async function exportExcel(u, lotName = "") {
         (x.repairs || []).join(" + "),
         excelSerialDate(x.deliveryDate || x.deliveredAt || "")
       ];
+      const valueColumns = ["B", "C", "D", "E", "F", "H", "I", "L"];
       for (let j = 0; j < values.length; j++) {
-        const col = colName(j + 2);
+        const col = valueColumns[j];
         sheetXml = setExcelCell(sheetXml, `${col}${r}`, values[j], fallbackStyles[col]);
       }
     }
