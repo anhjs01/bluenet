@@ -213,12 +213,12 @@ export async function exportExcel(u, lotName = "") {
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", blankrows: true });
     const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const required = ["article", "serial", "brand", "request", "maintenance", "delivery"];
+    const required = ["article", "serial", "brand", "request", "delivery"];
     const identifyHeaders = row => {
       const found = {};
       (row || []).slice(0, 8).forEach((value, index) => {
         const h = normalize(value);
-        if (/articulo|article|artic/.test(h)) found.article = index;
+        if (/articulo|article|artic|^n ?(?:ro|umero)?$/.test(h)) found.article = index;
         else if (/serie|serial|n s|ns|numero.*serie/.test(h)) found.serial = index;
         else if (/marca|fabricante|brand/.test(h)) found.brand = index;
         else if (/sin|ticket|solicitud|request/.test(h)) found.request = index;
