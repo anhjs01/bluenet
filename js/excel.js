@@ -289,19 +289,9 @@ export async function exportExcel(u, lotName = "") {
     const templateRowXml = templateRowMatch?.[0] || "";
     if (!templateRowXml) throw new Error("No se encontró la fila 6 para extender el formato de la plantilla.");
 
-    // Ajustar la plantilla a la cantidad exacta de unidades: eliminar filas vacías
-    // cuando hay menos de 60 y desplazar el pie; insertar filas si hay más.
-    const baseCapacity = lastExistingRow - firstDataRow + 1;
-    const extraRowsCount = Math.max(0, u.length - baseCapacity);
-    const unusedRowsCount = Math.max(0, baseCapacity - u.length);
-    if (unusedRowsCount) {
-      const firstUnusedRow = firstDataRow + u.length;
-      sheetXml = sheetXml.replace(/<row\b[^>]*>[\s\S]*?<\/row>/g, rowXml => {
-        const rowId = Number((rowXml.match(/^<row\b[^>]*\br="(\d+)"/) || [null, "0"])[1]);
-        return rowId >= firstUnusedRow && rowId <= lastExistingRow ? "" : rowXml;
-      });
-      sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, -unusedRowsCount);
-    }
+    // Mantener temporalmente el bloque inferior en su posición original.
+    // La compactación se reintroducirá después de validar el XML generado.
+    const extraRowsCount = Math.max(0, u.length - (lastExistingRow - firstDataRow + 1));
     if (extraRowsCount) {
       sheetXml = shiftWorksheetRows(sheetXml, firstInsertRow, extraRowsCount);
       const extraRows = [];
