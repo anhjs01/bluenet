@@ -155,10 +155,9 @@ function setExcelCell(sheetXml, address, value, styleFallback = "") {
 }
 
 function removeExcelCell(sheetXml, address) {
-  const pattern = new RegExp(\`<c\\\\b(?=[^>]*\\\\br="\${address}")[^>]*(?:\\\\/>|>[\\\\s\\\\S]*?<\\\\/c>)\`);
+  const pattern = new RegExp("<c\\\\b(?=[^>]*\\\\br=\\\"" + address + "\\\")[^>]*(?:\\\\/>|>[\\\\s\\\\S]*?<\\\\/c>)");
   return sheetXml.replace(pattern, "");
 }
-
 function safeExcelFileName(value) {");
   const pattern = new RegExp(`<c\\b(?=[^>]*\\br="${escaped}")[^>]*(?:\\/>|>[\\s\\S]*?<\\/c>)`);
   return sheetXml.replace(pattern, "");
@@ -215,7 +214,7 @@ export async function exportExcel(u, lotName = "") {
     }
 
     // Quitar las cuatro columnas adicionales del formato anterior en el área de la tabla.
-    const existingTableEnd = Number((sheetXml.match(/<dimension\\b[^>]*\\bref="[A-Z]+\\d+:[A-Z]+(\\d+)"/) || [null, "221"])[1]);
+    const existingTableEnd = Number((sheetXml.match(/<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+(\d+)"/) || [null, "221"])[1]);
     for (let r = 23; r <= existingTableEnd; r++) {
       for (const col of ["J", "K", "L", "M"]) {
         sheetXml = removeExcelCell(sheetXml, `${col}${r}`);
