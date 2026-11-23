@@ -191,7 +191,7 @@ export async function exportExcel(u, lotName = "") {
     const workbook = XLSX.read(sourceBuffer, { type: "array" });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", blankrows: true });
-    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const required = ["article", "serial", "brand", "request", "maintenance", "delivery"];
     const identifyHeaders = row => {
       const found = {};
