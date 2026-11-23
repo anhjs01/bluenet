@@ -230,44 +230,41 @@ export async function exportExcel(u, lotName = "", lotDate = "") {
   }
 
   try {
+    // La plantilla es fija: solo se reemplazan los valores de A6:H65.
+    // No se insertan filas, no se desplaza el footer y no se modifican
+    // encabezado, logo, combinaciones, dimensiones ni firmas.
+    const firstDataRow = 6;
+    const lastDataRow = 65;
+    const capacity = lastDataRow - firstDataRow + 1;
+
+    if (u.length > capacity) {
+      alert("La plantilla REM-04067-NEXA admite máximo 60 equipos por archivo. No se modificó ni se descargó el Excel.");
+      return;
+    }
+
     const sheetPath = "xl/worksheets/sheet1.xml";
     const sheetFile = sourceZip.file(sheetPath);
     if (!sheetFile) throw new Error("La plantilla no contiene la hoja Excel esperada.");
     let sheetXml = await sheetFile.async("string");
 
-    // La plantilla REM-04067-NEXA ya contiene logo, encabezado, datos de empresa,
-    // firmas, bordes y pie de página. Se conserva sin reconstruir ni borrar nada.
-    const firstDataRow = 6;
-    const originalLastDataRow = 65;
-    const firstFooterRow = 66;
-    const maxTemplateItems = originalLastDataRow - firstDataRow + 1;
-    const extraRows = Math.max(0, u.length - maxTemplateItems);
-
     const templateRowMatch = sheetXml.match(/<row\b(?=[^>]*\br="6")[^>]*>[\s\S]*?<\/row>/);
     const templateRowXml = templateRowMatch?.[0] || "";
-    if (!templateRowXml) throw new Error("No se encontró la fila 6 de la plantilla para replicar el formato.");
+    if (!templateRowXml) throw new Error("No se encontró la fila 6 de la plantilla.");
 
-    if (extraRows > 0) {
-      sheetXml = shiftExcelRowsDown(sheetXml, firstFooterRow, extraRows);
-      sheetXml = insertExcelRowsBefore(sheetXml, templateRowXml, firstFooterRow, extraRows, firstDataRow);
-    }
-
-    const lastTableRow = Math.max(originalLastDataRow, firstDataRow + u.length - 1);
     const columns = ["A", "B", "C", "D", "E", "F", "G", "H"];
     const fallbackStyles = {};
     for (const column of columns) {
       fallbackStyles[column] = excelCellStyle(templateRowXml, column + firstDataRow);
     }
 
-    // Limpiar únicamente el cuerpo de la tabla. El encabezado y las firmas se conservan.
-    for (let row = firstDataRow; row <= lastTableRow; row++) {
+    // Limpiar exclusivamente las celdas A:H de las filas 6 a 65.
+    for (let row = firstDataRow; row <= lastDataRow; row++) {
       for (const column of columns) {
         sheetXml = setExcelCell(sheetXml, column + row, null, fallbackStyles[column]);
       }
     }
 
-    // A-H corresponden exactamente a las ocho columnas de la plantilla original.
-    // La fecha de entrega siempre queda vacía para diligenciarla manualmente.
+    // Escribir los datos respetando las ocho columnas y el estilo ya existente.
     for (let index = 0; index < u.length; index++) {
       const unit = u[index];
       const row = firstDataRow + index;
@@ -300,7 +297,7 @@ export async function exportExcel(u, lotName = "", lotDate = "") {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
     console.error("Error al generar el Excel con la plantilla REM-04067-NEXA:", error);
-    alert("No se pudo generar el Excel conservando el diseño original de la remisión. No se descargó un archivo incompleto.\n" + (error.message || ""));
+    alert("No se pudo generar el Excel conservando el diseño original. No se descargó un archivo incompleto.\n" + (error.message || ""));
   }
 }
 
