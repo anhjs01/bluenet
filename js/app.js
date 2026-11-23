@@ -971,7 +971,8 @@ $("#exportExcel").onclick=async()=>{
   if(!lot){alert("Primero crea o selecciona un lote.");return;}
   exportExcel(
     await unitsForActiveLot(),
-    lot.name
+    lot.name,
+    lot.date
   );
 };
 
