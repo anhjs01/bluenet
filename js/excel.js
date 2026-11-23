@@ -233,16 +233,20 @@ export async function exportExcel(u, lotName = "") {
     // Eliminar únicamente el bloque de captura anterior y desplazar el pie
     // de plantilla para que quede inmediatamente después del número real de unidades.
     const cellKeys = Object.keys(sheet).filter(key => !key.startsWith("!"));
+    const footerCells = [];
     for (const key of cellKeys) {
       const point = XLSX.utils.decode_cell(key);
-      if (point.r >= firstDataIndex && point.r <= originalLastDataIndex) delete sheet[key];
-      else if (point.r >= footerStartIndex && rowDelta !== 0) {
-        const destination = { r: point.r + rowDelta, c: point.c };
-        const newAddress = XLSX.utils.encode_cell(destination);
-        sheet[newAddress] = sheet[key];
+      if (point.r >= firstDataIndex && point.r <= originalLastDataIndex) {
+        delete sheet[key];
+      } else if (point.r >= footerStartIndex && rowDelta !== 0) {
+        footerCells.push({
+          address: XLSX.utils.encode_cell({ r: point.r + rowDelta, c: point.c }),
+          value: sheet[key]
+        });
         delete sheet[key];
       }
     }
+    for (const item of footerCells) sheet[item.address] = item.value;
 
     if (Array.isArray(sheet["!merges"]) && rowDelta !== 0) {
       sheet["!merges"] = sheet["!merges"].map(range => {
@@ -262,8 +266,8 @@ export async function exportExcel(u, lotName = "") {
     const setCell = (rowIndex, columnIndex, value) => {
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
       const existing = sheet[address] || {};
-      const style = clone(existing.s) || {};
       const baseStyle = rowStyles[columnIndex] || {};
+      const style = clone(baseStyle) || {};
       const baseFont = baseStyle.font || {};
       const baseAlignment = baseStyle.alignment || {};
       style.font = { ...baseFont, name: "Tahoma", sz: 5 };
