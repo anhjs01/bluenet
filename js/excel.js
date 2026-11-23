@@ -216,7 +216,7 @@ function insertExcelRowsBefore(sheetXml, rowXml, beforeRow, count, templateRowNu
   return sheetXml.replace("</sheetData>", rows.join("") + "</sheetData>");
 }
 
-export async function exportExcel(u, lotName = "") {
+export async function exportExcel(u, lotName = "", lotDate = "") {
   if (!window.JSZip) return alert("No está disponible el módulo necesario para conservar la plantilla Excel original.");
 
   let sourceZip;
@@ -276,7 +276,7 @@ export async function exportExcel(u, lotName = "") {
         unit.ticket || "",
         String(unit.unitId || ""),
         unit.manufacturer || "",
-        excelSerialDate(unit.lotDate),
+        excelSerialDate(lotDate || unit.lotDate),
         unit.readType || "",
         Array.isArray(unit.repairs) ? unit.repairs.join(" + ") : (unit.repairs || ""),
         null
