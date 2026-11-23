@@ -198,7 +198,7 @@ export async function exportExcel(u, lotName = "") {
       (row || []).slice(0, 8).forEach((value, index) => {
         const h = normalize(value);
         if (/articulo|article|artic/.test(h)) found.article = index;
-        else if (/numero.*serie|n.*serie|serial|serie/.test(h)) found.serial = index;
+        else if (/serie|serial|s\\s*n|s n|s\\/n|nro.*serie|numero.*de.*serie/.test(h)) found.serial = index;
         else if (/marca|fabricante|brand/.test(h)) found.brand = index;
         else if (/solicitud.*reparacion|solicitud|ticket|request/.test(h)) found.request = index;
         else if (/tipo.*mantenimiento|mantenimiento|maintenance/.test(h)) found.maintenance = index;
@@ -214,6 +214,13 @@ export async function exportExcel(u, lotName = "") {
       const alternatives = matrix.slice(0, 8).map((row, index) => ({ row: index + 1, found: identifyHeaders(row) }));
       alternatives.sort((a, b) => countHeaders(b.found) - countHeaders(a.found));
       if (countHeaders(alternatives[0]?.found || {}) > countHeaders(headerColumns)) headerColumns = alternatives[0].found;
+    }
+    // Si la plantilla usa un título no estándar para el número de serie,
+    // inferir la columna inmediatamente posterior a "Artículo" solo si está libre.
+    if (headerColumns.serial === undefined && headerColumns.article !== undefined) {
+      const inferredSerialColumn = headerColumns.article + 1;
+      const occupied = Object.entries(headerColumns).some(([key, value]) => key !== "serial" && value === inferredSerialColumn);
+      if (inferredSerialColumn < 8 && !occupied) headerColumns.serial = inferredSerialColumn;
     }
     const missing = required.filter(key => headerColumns[key] === undefined || headerColumns[key] > 7);
     if (missing.length) {
