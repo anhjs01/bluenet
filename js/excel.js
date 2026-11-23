@@ -198,59 +198,6 @@ function shiftExcelRowsDown(sheetXml, startRow, amount) {
   });
 
   sheetXml = sheetXml.replace(/(<mergeCell\b[^>]*\bref=")([^"]+)(")/g, (_match, before, reference, after) => {
-    const shifted = reference.replace(/([A-Z]+)(\d+)/g, (part, column, rowText) => {
-      const row = Number(rowText);
-      return column + (row >= startRow ? row + amount : row);
-    });
-    return before + shifted + after;
-  });
-
-  sheetXml = sheetXml.replace(/(<dimension\b[^>]*\bref="[A-Z]+\d+:[A-Z]+)(\d+)(")/, (_match, before, lastRow, after) => {
-    const row = Number(lastRow);
-    return before + (row >= startRow ? row + amount : row) + after;
-  });
-
-  return sheetXml;
-}
-
-function cloneExcelRow(rowXml, fromRow, toRow) {
-  let clone = rowXml.replace(/(<row\b[^>]*\br=")\d+(")/, "$1" + toRow + "$2");
-  const cellRefPattern = new RegExp('(\\br="[A-Z]+)' + fromRow + '(")', "g");
-  clone = clone.replace(cellRefPattern, "$1" + toRow + "$2");
-  return clone;
-}
-
-function insertExcelRowsBefore(sheetXml, rowXml, beforeRow, count, templateRowNumber) {
-  if (count <= 0) return sheetXml;
-  const rows = [];
-  for (let offset = 0; offset < count; offset++) {
-    rows.push(cloneExcelRow(rowXml, templateRowNumber, beforeRow + offset));
-  }
-
-  const nextRow = beforeRow + count;
-  const marker = new RegExp('<row\\b(?=[^>]*\\br="' + nextRow + '")[^>]*>[\\s\\S]*?<\\/row>');
-  const match = sheetXml.match(marker);
-  if (match && match.index !== undefined) {
-    return sheetXml.slice(0, match.index) + rows.join("") + sheetXml.slice(match.index);
-  }
-
-  return sheetXml.replace("</sheetData>", rows.join("") + "</sheetData>");
-}
-
-function shiftExcelRowsDown(sheetXml, startRow, amount) {
-  if (amount <= 0) return sheetXml;
-
-  sheetXml = sheetXml.replace(/<row\b[^>]*\br="(\d+)"[^>]*>[\s\S]*?<\/row>/g, (rowXml, rowText) => {
-    const rowNumber = Number(rowText);
-    if (rowNumber < startRow) return rowXml;
-    const nextRow = rowNumber + amount;
-    let updated = rowXml.replace(/(<row\b[^>]*\br=")\d+(")/, "$1" + nextRow + "$2");
-    const cellRefPattern = new RegExp('(\\br="[A-Z]+)' + rowNumber + '(")', "g");
-    updated = updated.replace(cellRefPattern, "$1" + nextRow + "$2");
-    return updated;
-  });
-
-  sheetXml = sheetXml.replace(/(<mergeCell\b[^>]*\bref=")([^"]+)(")/g, (_match, before, reference, after) => {
     const shifted = reference.replace(/([A-Z]+)(\d+)/g, (_part, column, rowText) => {
       const row = Number(rowText);
       return column + (row >= startRow ? row + amount : row);
@@ -269,8 +216,7 @@ function shiftExcelRowsDown(sheetXml, startRow, amount) {
 function cloneExcelRow(rowXml, fromRow, toRow) {
   let clone = rowXml.replace(/(<row\b[^>]*\br=")\d+(")/, "$1" + toRow + "$2");
   const cellRefPattern = new RegExp('(\\br="[A-Z]+)' + fromRow + '(")', "g");
-  clone = clone.replace(cellRefPattern, "$1" + toRow + "$2");
-  return clone;
+  return clone.replace(cellRefPattern, "$1" + toRow + "$2");
 }
 
 function insertExcelRowsBefore(sheetXml, rowXml, beforeRow, count, templateRowNumber) {
